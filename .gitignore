@@ -1,0 +1,10 @@
+.env
+.cache/
+music/*
+!music/.gitkeep
+!music/live/
+music/live/*
+!music/live/.gitkeep
+!music/play/
+music/play/*
+!music/play/.gitkeep

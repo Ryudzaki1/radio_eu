@@ -1,0 +1,8 @@
+.cache
+.env
+.git
+music
+node_modules
+npm-debug.log
+Dockerfile
+docker-compose.yml

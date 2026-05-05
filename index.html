@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Chill Radio</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app public-app">
+      <section class="player public-player" aria-label="AI Chill Radio">
+        <div class="topbar">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <div>
+              <h1>AI Chill Radio</h1>
+              <p id="status">Готово к подключению</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button id="themeToggle" class="theme-toggle" type="button" aria-label="Переключить тему">☾</button>
+            <div class="live-badge">
+              <span aria-hidden="true"></span>
+              LIVE
+            </div>
+          </div>
+        </div>
+
+        <div class="now">
+          <span class="label">Сейчас в эфире</span>
+          <strong id="nowTitle">Единый радиопоток</strong>
+          <span id="nowMeta">Музыка и диктор идут одним live-аудио для всех слушателей</span>
+        </div>
+
+        <div id="musicProgress" class="music-progress" aria-live="polite">
+          <div class="progress-head">
+            <span id="progressKind">Музыка</span>
+            <strong id="progressTitle">Ожидаем трек</strong>
+          </div>
+          <div class="progress-bar" aria-hidden="true">
+            <span id="progressFill"></span>
+          </div>
+          <div class="progress-times">
+            <span id="progressElapsed">0:00</span>
+            <span id="progressRemaining">-0:00</span>
+          </div>
+        </div>
+
+        <audio id="audio" preload="none" playsinline></audio>
+
+        <div class="controls public-controls">
+          <button id="playButton" class="primary" type="button" aria-label="Старт">▶</button>
+          <label class="volume">
+            <span>Громкость</span>
+            <input id="volume" type="range" min="0" max="1" step="0.01" value="0.72">
+          </label>
+        </div>
+      </section>
+    </main>
+
+    <script src="/script.js"></script>
+  </body>
+</html>

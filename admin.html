@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Админка AI Chill Radio</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app admin-app">
+      <section class="player admin-hero">
+        <div class="topbar">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <div>
+              <h1>ЛК админа</h1>
+              <p id="adminStatus">Загрузка настроек</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button id="themeToggle" class="theme-toggle" type="button" aria-label="Переключить тему">☾</button>
+            <a class="admin-link" href="/">Страница слушателя</a>
+          </div>
+        </div>
+
+        <nav class="admin-tabs" aria-label="Разделы админки">
+          <button class="admin-tab active" type="button" data-tab="air">Эфир</button>
+          <button class="admin-tab" type="button" data-tab="topics">Темы</button>
+          <button class="admin-tab" type="button" data-tab="prompts">Промпты</button>
+          <button class="admin-tab" type="button" data-tab="voice">Голос</button>
+          <button class="admin-tab" type="button" data-tab="archive">Архив</button>
+          <button class="admin-tab" type="button" data-tab="listeners">Слушатели</button>
+          <button class="admin-tab" type="button" data-tab="tests">Тесты</button>
+        </nav>
+      </section>
+
+      <section class="admin-panel active" data-panel="air">
+        <div class="player admin-monitor" aria-label="Эфир станции">
+        <div class="section-head">
+          <div>
+            <h2>Эфир станции</h2>
+            <p id="status">Подключение к live-потоку</p>
+          </div>
+          <div class="live-badge">
+            <span aria-hidden="true"></span>
+            LIVE
+          </div>
+        </div>
+
+        <div class="now">
+          <span class="label">Сейчас в эфире</span>
+          <strong id="nowTitle">Загрузка плейлиста</strong>
+          <span id="nowMeta">Музыка из локальной папки</span>
+        </div>
+
+        <div id="musicProgress" class="music-progress" aria-live="polite">
+          <div class="progress-head">
+            <span id="progressKind">Музыка</span>
+            <strong id="progressTitle">Ожидаем трек</strong>
+          </div>
+          <div class="progress-bar" aria-hidden="true">
+            <span id="progressFill"></span>
+          </div>
+          <div class="progress-times">
+            <span id="progressElapsed">0:00</span>
+            <span id="progressRemaining">-0:00</span>
+          </div>
+        </div>
+
+          <audio id="audio" preload="auto" playsinline></audio>
+
+        <div class="controls public-controls">
+          <button id="playButton" class="primary" type="button" aria-label="Старт">▶</button>
+          <button id="nextButton" type="button">Переподключить поток</button>
+          <button id="refreshButton" type="button">Обновить список треков</button>
+          <button id="syncMusicButton" type="button">Синхронизировать музыку</button>
+          <label class="volume">
+            <span>Общая громкость</span>
+            <input id="volume" type="range" min="0" max="1" step="0.01" value="0.72">
+          </label>
+        </div>
+        <div class="broadcast-actions">
+          <button id="queueGreetingButton" class="primary-action" type="button">Приветствие в эфир</button>
+          <button id="queueFactButton" class="primary-action" type="button">Сказать следующую тему</button>
+          <button id="queueFarewellButton" class="primary-action" type="button">Прощание в эфир</button>
+        </div>
+        </div>
+
+        <div class="panel console admin-monitor" aria-label="Диктор в эфире">
+        <div class="section-head">
+          <h2>Диктор</h2>
+          <span id="voiceStatus">Ожидаем включение</span>
+        </div>
+        <p id="announcerText">Админские генерации и вопросы из Telegram будут звучать здесь поверх музыки.</p>
+        </div>
+
+        <div class="panel admin-monitor music-shelves" aria-label="Музыка эфира">
+        <div class="music-shelf">
+          <div class="section-head compact">
+            <div>
+              <h2>Live эфир</h2>
+              <p>Эта музыка играет по кругу сама. Она не вставляется вручную.</p>
+            </div>
+          </div>
+          <div id="liveTracks" class="tracks" aria-live="polite"></div>
+        </div>
+        <div class="music-shelf">
+          <div class="section-head compact">
+            <div>
+              <h2>Play вставки</h2>
+              <p>Эти треки можно ставить в эфир. После очереди эфир вернется к live.</p>
+            </div>
+          </div>
+          <div id="playTracks" class="tracks" aria-live="polite"></div>
+        </div>
+        </div>
+      </section>
+
+      <section class="panel admin-panel" data-panel="topics">
+        <div class="section-head">
+          <h2>Темы и подтемы</h2>
+          <button id="addTopicButton" type="button">Добавить тему</button>
+        </div>
+
+        <div class="topic-editor">
+          <aside id="topicList" class="topic-list" aria-label="Список тем"></aside>
+
+          <div class="topic-detail">
+            <label>
+              <span>Название темы</span>
+              <input id="topicNameInput" type="text">
+            </label>
+
+            <div class="section-head compact">
+              <h2>Подтемы</h2>
+              <button id="addSubtopicButton" type="button">Добавить подтему</button>
+            </div>
+
+            <div id="subtopicList" class="subtopic-list"></div>
+
+            <div class="admin-actions">
+              <button id="queueSelectedTopicButton" class="primary-action" type="button">Поставить выбранную тему в эфир</button>
+              <button id="deleteTopicButton" type="button">Удалить тему</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel admin-panel" data-panel="prompts">
+        <div class="admin-section-title">
+          <h2>Промпты эфира</h2>
+          <p>После изменения нажми «Обновить промпты», чтобы новые приветствия, факты и прощания генерировались заново.</p>
+        </div>
+        <div class="admin-grid prompt-grid">
+          <label>
+            <span>Название станции</span>
+            <input id="stationNameInput" type="text">
+          </label>
+          <label>
+            <span>Промпт приветствия</span>
+            <textarea id="greetingPrompt" rows="5"></textarea>
+          </label>
+          <label>
+            <span>Промпт факта</span>
+            <textarea id="factPrompt" rows="8"></textarea>
+          </label>
+          <label>
+            <span>Промпт ответа слушателю</span>
+            <textarea id="listenerPrompt" rows="8"></textarea>
+          </label>
+          <label>
+            <span>Промпт прощания</span>
+            <textarea id="farewellPrompt" rows="5"></textarea>
+          </label>
+          <label>
+            <span>Промпт подводки к треку</span>
+            <textarea id="announcementPrompt" rows="4"></textarea>
+          </label>
+        </div>
+        <div class="admin-actions prompt-actions">
+          <button id="refreshPromptsButton" class="primary wide-primary" type="button">Обновить промпты</button>
+          <button id="clearArchiveButton" type="button">Удалить все архивы аудио</button>
+          <p class="action-note">Обновление промптов больше не удаляет архив. Архив очищается только отдельной кнопкой.</p>
+        </div>
+      </section>
+
+      <section class="panel admin-panel" data-panel="voice">
+        <div class="voice-layout">
+          <div class="voice-controls block-panel">
+            <h2>Параметры голоса</h2>
+            <label><span>Stability</span><input id="stability" type="range" min="0" max="1" step="0.01"></label>
+            <label><span>Similarity</span><input id="similarityBoost" type="range" min="0" max="1" step="0.01"></label>
+            <label><span>Style</span><input id="style" type="range" min="0" max="1" step="0.01"></label>
+            <label><span>Speed</span><input id="speed" type="range" min="0.7" max="1.2" step="0.01"></label>
+            <label class="check-row"><input id="speakerBoost" type="checkbox"> Speaker boost</label>
+          </div>
+
+          <div class="voice-controls block-panel">
+            <h2>Экономия генерации</h2>
+            <label>
+              <span>Сколько аудиофактов накопить перед архивным режимом</span>
+              <input id="archiveAfterTotal" type="number" min="10" max="2000">
+            </label>
+            <label class="check-row"><input id="useArchiveWhenReady" type="checkbox"> Брать факты из архива, когда их достаточно</label>
+            <div class="admin-actions">
+              <button id="saveButton" type="button">Сохранить настройки</button>
+            </div>
+          </div>
+
+          <div class="voice-controls block-panel">
+            <h2>Микс эфира</h2>
+            <label><span>Музыка в обычном режиме</span><input id="musicLevel" type="range" min="0" max="1" step="0.01"></label>
+            <label><span>Голос диктора</span><input id="voiceLevel" type="range" min="0" max="1" step="0.01"></label>
+            <label><span>Музыка под диктором от уровня голоса</span><input id="duckingRatio" type="range" min="0" max="1" step="0.01"></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel admin-panel" data-panel="archive">
+        <div class="section-head">
+          <div>
+            <h2>Архив аудио</h2>
+            <p>Слушай и удаляй отдельные mp3 прямо из ЛК.</p>
+          </div>
+          <button id="refreshArchiveButton" type="button">Обновить архив</button>
+        </div>
+        <div id="archiveList" class="archive-list"></div>
+      </section>
+
+      <section class="panel admin-panel" data-panel="listeners">
+        <div class="section-head">
+          <div>
+            <h2>Слушатели и вопросы</h2>
+            <p>Новые вопросы из Telegram появляются здесь автоматически.</p>
+          </div>
+          <div class="inline-actions">
+            <button id="refreshListenersButton" type="button">Обновить</button>
+            <button id="resetListenersButton" class="danger-button" type="button">Сбросить Telegram</button>
+          </div>
+        </div>
+        <div id="listenerList" class="listener-list"></div>
+      </section>
+
+      <section class="panel admin-panel" data-panel="tests">
+        <div class="admin-actions">
+          <button id="testGreetingButton" type="button">Тест приветствия</button>
+          <button id="testFactButton" type="button">Тест темы</button>
+        </div>
+
+        <audio id="adminAudio" controls></audio>
+        <p id="testOutput"></p>
+      </section>
+    </main>
+
+    <script src="/script.js"></script>
+    <script src="/admin.js"></script>
+  </body>
+</html>

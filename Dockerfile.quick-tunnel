@@ -1,0 +1,10 @@
+FROM cloudflare/cloudflared:latest AS cloudflared
+
+FROM alpine:3.20
+
+COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
+COPY bot/quick-tunnel-watch.sh /quick-tunnel-watch.sh
+
+RUN chmod +x /quick-tunnel-watch.sh
+
+ENTRYPOINT ["/bin/sh", "/quick-tunnel-watch.sh"]
