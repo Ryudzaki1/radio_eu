@@ -223,14 +223,29 @@ function createServer(config) {
 
       if (request.method === "POST" && url.pathname === "/api/admin/music/insert") {
         const body = await readJson(request);
-        const ok = broadcast.enqueueMusic(body.file);
+        const track = await findPlayableTrack(config, body.file);
+        if (!track.ok) {
+          await writeSystemLog(config, "api_play_insert_error", {
+            file: body.file || null,
+            error: track.error,
+          });
+          await sendJson(response, 400, {
+            ok: false,
+            file: body.file || null,
+            stream: broadcast.getStatus(),
+            error: track.error,
+          });
+          return;
+        }
+
+        const ok = broadcast.enqueueMusic(track.file);
         await writeSystemLog(config, ok ? "api_play_insert_ok" : "api_play_insert_error", {
-          file: body.file || null,
+          file: track.file,
           error: ok ? null : broadcast.lastMusicEnqueueError || "Track file is not available",
         });
         await sendJson(response, ok ? 200 : 400, {
           ok,
-          file: body.file || null,
+          file: track.file,
           stream: broadcast.getStatus(),
           error: ok ? null : broadcast.lastMusicEnqueueError || "Track file is not available",
         });
@@ -337,6 +352,11 @@ function createServer(config) {
       if (request.method === "POST" && url.pathname === "/api/admin/prompts/refresh") {
         const body = await readJson(request);
         const admin = await writeAdminConfig(config, body);
+        await writeSystemLog(config, "admin_prompts_refreshed", {
+          stationName: admin.stationName,
+          activeHostId: admin.prompts?.activeHostId || null,
+          hostCount: admin.prompts?.hosts ? Object.keys(admin.prompts.hosts).length : 0,
+        });
         await emitAdmin(config, "config", admin);
         await emitFactState(config);
         await sendJson(response, 200, { admin, reset: false });
@@ -1199,6 +1219,21 @@ async function deleteArchiveItem(config, relativePath) {
   }
 
   await fs.promises.rm(filePath, { force: true });
+}
+
+async function findPlayableTrack(config, file) {
+  const requested = String(file || "").trim();
+  if (!requested) {
+    return { ok: false, error: "Track file is required" };
+  }
+
+  const tracks = await listTracks(config.playMusicDir, { urlPrefix: "/music/play" });
+  const track = tracks.find((item) => item.file === requested);
+  if (!track) {
+    return { ok: false, error: "Track file is not available" };
+  }
+
+  return { ok: true, file: track.file };
 }
 
 function cleanArchivePart(value) {

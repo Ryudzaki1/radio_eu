@@ -22,6 +22,7 @@ const subtopicList = document.querySelector("#subtopicList");
 const addTopicButton = document.querySelector("#addTopicButton");
 const addSubtopicButton = document.querySelector("#addSubtopicButton");
 const deleteTopicButton = document.querySelector("#deleteTopicButton");
+const saveTopicsButton = document.querySelector("#saveTopicsButton");
 const startTopicCycleButton = document.querySelector("#startTopicCycleButton");
 const stopTopicCycleButton = document.querySelector("#stopTopicCycleButton");
 const topicCycleStatus = document.querySelector("#topicCycleStatus");
@@ -110,6 +111,7 @@ testFactButton?.addEventListener("click", () => enqueueAdminVoiceTest("/api/fact
 addTopicButton?.addEventListener("click", addTopic);
 addSubtopicButton?.addEventListener("click", addSubtopic);
 deleteTopicButton?.addEventListener("click", deleteSelectedTopic);
+saveTopicsButton?.addEventListener("click", saveTopics);
 initHelpTips();
 initSyncedSliders();
 initAdminActionLogging();
@@ -455,6 +457,7 @@ function addTopic() {
   localStorage.setItem(adminUiStorage.topicIndex, String(selectedTopicIndex));
   renderTopicList();
   renderTopicDetail();
+  setStatus("Новая тема добавлена. Нажмите «Сохранить темы», чтобы применить изменения.");
 }
 
 function addSubtopic() {
@@ -463,6 +466,7 @@ function addSubtopic() {
   topic.subtopics.push("новая подтема");
   renderTopicDetail();
   renderTopicList();
+  setStatus("Подтема добавлена. Нажмите «Сохранить темы», чтобы применить изменения.");
 }
 
 function deleteSelectedTopic() {
@@ -476,6 +480,7 @@ function deleteSelectedTopic() {
   localStorage.setItem(adminUiStorage.topicIndex, String(selectedTopicIndex));
   renderTopicList();
   renderTopicDetail();
+  setStatus("Тема удалена из редактора. Нажмите «Сохранить темы», чтобы применить изменения.");
 }
 
 async function saveConfig() {
@@ -488,6 +493,26 @@ async function saveConfig() {
   currentConfig = await response.json();
   renderConfig(currentConfig);
   setStatus(response.ok ? "Настройки сохранены" : "Ошибка сохранения");
+  return { ok: response.ok, config: currentConfig };
+}
+
+async function saveTopics() {
+  if (!currentConfig?.topics?.length) return;
+  saveTopicsButton.disabled = true;
+  setStatus("Сохраняю темы и подтемы");
+  try {
+    const result = await saveConfig();
+    if (!result.ok) {
+      setStatus(currentConfig?.error || "Не удалось сохранить темы");
+      return;
+    }
+    await refreshFactLog();
+    setStatus("Темы и подтемы сохранены");
+  } catch (error) {
+    setStatus(`Темы: ошибка сохранения - ${error.message}`);
+  } finally {
+    saveTopicsButton.disabled = false;
+  }
 }
 
 async function saveVoiceMusicSettings() {
@@ -996,6 +1021,11 @@ function setBroadcastButtonStopped(isStopped) {
 async function clearArchive() {
   const confirmed = window.confirm("Удалить все архивы аудио? Это удалит mp3 приветствий, фактов, прощаний и слушательских вопросов.");
   if (!confirmed) return;
+  const typed = window.prompt("Для подтверждения введите: УДАЛИТЬ");
+  if (typed !== "УДАЛИТЬ") {
+    setStatus("Очистка архива отменена");
+    return;
+  }
   const response = await fetch("/api/admin/archive/clear", { method: "POST" });
   if (!response.ok) {
     setStatus("Не удалось очистить архив");

@@ -183,6 +183,7 @@
 
             <div class="admin-actions">
               <button id="queueSelectedTopicButton" class="primary-action" type="button">Поставить выбранную тему в эфир</button>
+              <button id="saveTopicsButton" class="primary-action" type="button">Сохранить темы</button>
               <button id="deleteTopicButton" type="button">Удалить тему</button>
             </div>
           </div>
@@ -230,8 +231,7 @@
         </div>
         <div class="admin-actions prompt-actions">
           <button id="refreshPromptsButton" class="primary wide-primary" type="button">Обновить промпты</button>
-          <button id="clearArchiveButton" type="button">Удалить все архивы аудио</button>
-          <p class="action-note">Обновление промптов больше не удаляет архив. Архив очищается только отдельной кнопкой.</p>
+          <p class="action-note">Обновление промптов больше не удаляет архив. Очистка аудиоархива находится во вкладке «Архив».</p>
         </div>
       </section>
 
@@ -287,7 +287,10 @@
             <h2>Архив аудио</h2>
             <p>Слушай и удаляй отдельные mp3 прямо из ЛК.</p>
           </div>
-          <button id="refreshArchiveButton" type="button">Обновить архив</button>
+          <div class="inline-actions">
+            <button id="refreshArchiveButton" type="button">Обновить архив</button>
+            <button id="clearArchiveButton" class="danger-button" type="button">Удалить все архивы аудио</button>
+          </div>
         </div>
         <div id="archiveList" class="archive-list"></div>
       </section>

@@ -1491,7 +1491,9 @@ class BroadcastStream {
     if (!file) return null;
     try {
       const filePath = resolveInside(this.config.playMusicDir, String(file));
-      return AUDIO_EXTENSIONS.has(path.extname(filePath).toLowerCase()) ? filePath : null;
+      if (!AUDIO_EXTENSIONS.has(path.extname(filePath).toLowerCase())) return null;
+      const stats = fs.statSync(filePath, { throwIfNoEntry: false });
+      return stats?.isFile() ? filePath : null;
     } catch {
       return null;
     }
