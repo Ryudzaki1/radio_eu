@@ -7,6 +7,7 @@ const { URL } = require("node:url");
 const { createFact, createFarewell, createGreeting, createListenerQuestion } = require("./ai/announcer");
 const { pingDeepSeek } = require("./ai/deepseek");
 const { pingElevenLabs } = require("./ai/elevenlabs");
+const { getAiUsage } = require("./ai/usage");
 const { readAdminConfig, writeAdminConfig } = require("./adminStore");
 const { BroadcastStream } = require("./broadcast");
 const { readAvailableFactLog, resetFactLog, setCursor } = require("./factLog");
@@ -396,6 +397,11 @@ function createServer(config) {
         if (result.ok) enqueueListenerQuestion(config, broadcast, result.question);
         await emitAdmin(config, "listeners", await readListenerStore(config));
         await sendJson(response, result.ok ? 200 : 403, result);
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/listeners/ai-usage") {
+        await sendJson(response, 200, await getAiUsage(config));
         return;
       }
 

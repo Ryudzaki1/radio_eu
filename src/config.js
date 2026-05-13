@@ -36,6 +36,7 @@ const config = {
     apiKey: process.env.DEEPSEEK_API_KEY || "",
     model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
     url: process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions",
+    balanceUrl: process.env.DEEPSEEK_BALANCE_URL || "",
   },
   elevenlabs: {
     apiKey: process.env.ELEVENLABS_API_KEY || "",

@@ -11,12 +11,30 @@ const allowedTelegramIds = parseList(process.env.BOT_ALLOWED_TELEGRAM_IDS);
 const allowedUsernames = parseList(process.env.BOT_ALLOWED_USERNAMES).map((item) => item.toLowerCase());
 const notifyChatIds = parseList(process.env.BOT_NOTIFY_CHAT_IDS);
 const adminTelegramIds = parseList(process.env.BOT_ADMIN_TELEGRAM_IDS);
+const adminUsernames = parseList(process.env.BOT_ADMIN_USERNAMES).map((item) => item.toLowerCase());
 const linkStatePath = process.env.BOT_LINK_STATE_PATH || "";
 const publicUrlStatePath = process.env.PUBLIC_URL_STATE_PATH || "/cache/config/public-url.json";
 const publicUrlHealthStatePath = process.env.PUBLIC_URL_HEALTH_STATE_PATH || "/cache/config/public-url-health.json";
+const aiUsageStatePath = process.env.AI_USAGE_STATE_PATH || "/cache/config/ai-usage.json";
+const aiUsageNotifyIntervalMs = clampNumber(process.env.AI_USAGE_NOTIFY_INTERVAL_MS, 60 * 60_000, 24 * 60 * 60_000, 6 * 60 * 60_000);
+const aiUsageNotifyThresholdPercent = clampNumber(process.env.AI_USAGE_NOTIFY_THRESHOLD_PERCENT, 1, 100, 15);
 const publicUrlHealthIntervalMs = clampNumber(process.env.PUBLIC_URL_HEALTH_INTERVAL_MS, 60_000, 24 * 60 * 60_000, 5 * 60_000);
 const publicServerIp = String(process.env.PUBLIC_SERVER_IP || process.env.RU_PUBLIC_IP || "").trim();
 const listenerStorePath = process.env.LISTENER_STORE_PATH || "/cache/config/listeners.json";
+const deepseekConfig = {
+  apiKey: process.env.DEEPSEEK_API_KEY || "",
+  url: process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions",
+  balanceUrl: process.env.DEEPSEEK_BALANCE_URL || "",
+};
+const elevenlabsConfig = {
+  apiKey: process.env.ELEVENLABS_API_KEY || "",
+  baseUrl: process.env.ELEVENLABS_BASE_URL || "https://api.elevenlabs.io",
+};
+const adminPanelLabels = {
+  question: "Вопрос",
+  radio: "Ссылка на эфир",
+  tokens: "Остаток токенов",
+};
 
 if (!token || !listenerApiToken) {
   console.error("TELEGRAM_BOT_TOKEN and LISTENER_API_TOKEN are required");
@@ -27,6 +45,7 @@ let offset = 0;
 
 scheduleRadioLinkNotification();
 schedulePublicUrlHealthCheck();
+scheduleAiUsageNotification();
 setupBotInterface().catch((error) => console.error(`bot interface error: ${error.message}`));
 
 poll().catch((error) => {
@@ -61,11 +80,15 @@ async function handleMessage(message) {
   const username = message.from.username || "";
   const profileName = getProfileName(message.from);
   const command = text.split(/\s+/)[0].split("@")[0].toLowerCase();
+  const isAdmin = isBotAdmin(message.from);
 
-  const canAskQuestions = isQuestionUserAllowed(message.from);
+  const canAskQuestions = isAdmin || isQuestionUserAllowed(message.from);
 
   if (command === "/start") {
     const currentPublicUrl = await getPublicRadioUrl();
+    if (isAdmin) {
+      await sendAdminPanel(chatId, currentPublicUrl);
+    }
     if (!canAskQuestions) {
       await sendListenOnlyIntro(chatId, currentPublicUrl);
       return;
@@ -88,13 +111,32 @@ async function handleMessage(message) {
     return;
   }
 
+  if (isAdmin && isAdminPanelText(text, adminPanelLabels.question)) {
+    await sendQuestionPrompt(chatId);
+    return;
+  }
+
+  if (isAdmin && isAdminPanelText(text, adminPanelLabels.radio)) {
+    await sendRadioLinkMessage(chatId);
+    return;
+  }
+
+  if (isAdmin && isAdminPanelText(text, adminPanelLabels.tokens)) {
+    await sendAiUsageReport(chatId);
+    return;
+  }
+
+  if (command === "/tokens") {
+    if (!isAdmin) {
+      await sendAccessDenied(chatId);
+      return;
+    }
+    await sendAiUsageReport(chatId);
+    return;
+  }
+
   if (command === "/radio") {
-    const currentPublicUrl = await getPublicRadioUrl();
-    await sendRadioLink(chatId, [
-      "Актуальная ссылка на эфир Sweetie Fox:",
-      "",
-      `<a href="${escapeHtml(currentPublicUrl)}">${escapeHtml(currentPublicUrl)}</a>`,
-    ].join("\n"), currentPublicUrl);
+    await sendRadioLinkMessage(chatId);
     return;
   }
 
@@ -220,6 +262,33 @@ async function sendQuestionPrompt(chatId) {
   await send(chatId, "Напиши вопрос одним сообщением. Я передам его Sweetie Fox в очередь эфира.");
 }
 
+async function sendAdminPanel(chatId, publicUrl) {
+  await send(chatId, [
+    "Админ-панель Sweetie Fox.",
+    "Выбери действие кнопкой ниже или используй команды: /question, /radio, /tokens.",
+  ].join("\n"), buildAdminPanelReplyMarkup());
+  await sendRadioLink(chatId, [
+    "Актуальная ссылка на эфир:",
+    "",
+    `<a href="${escapeHtml(publicUrl)}">${escapeHtml(publicUrl)}</a>`,
+  ].join("\n"), publicUrl);
+}
+
+async function sendRadioLinkMessage(chatId) {
+  const currentPublicUrl = await getPublicRadioUrl();
+  await sendRadioLink(chatId, [
+    "Актуальная ссылка на эфир Sweetie Fox:",
+    "",
+    `<a href="${escapeHtml(currentPublicUrl)}">${escapeHtml(currentPublicUrl)}</a>`,
+  ].join("\n"), currentPublicUrl);
+}
+
+async function sendAiUsageReport(chatId) {
+  await send(chatId, "Проверяю остатки генерации текста и аудио...");
+  const usage = await getAiUsage();
+  await send(chatId, formatAiUsageReport(usage), buildAdminPanelReplyMarkup());
+}
+
 async function sendRegistrationError(chatId, result) {
   if (result.reason === "forbidden") {
     await sendAccessDenied(chatId);
@@ -273,11 +342,12 @@ async function telegram(method, body) {
   return payload;
 }
 
-async function send(chatId, text) {
+async function send(chatId, text, replyMarkup = undefined) {
   await telegram("sendMessage", {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
+    reply_markup: replyMarkup,
   });
 }
 
@@ -296,9 +366,19 @@ async function setupBotInterface() {
     commands: [
       { command: "start", description: "Запуск и регистрация" },
       { command: "radio", description: "Открыть эфир" },
-      { command: "question", description: "Задать вопрос Sweetie Fox" },
     ],
   });
+  for (const chatId of adminTelegramIds) {
+    await telegram("setMyCommands", {
+      scope: { type: "chat", chat_id: chatId },
+      commands: [
+        { command: "start", description: "Открыть админ-панель" },
+        { command: "question", description: "Задать вопрос Sweetie Fox" },
+        { command: "radio", description: "Получить ссылку на эфир" },
+        { command: "tokens", description: "Остаток генерации текста и аудио" },
+      ],
+    });
+  }
   await setupBotMenu(await getPublicRadioUrl());
 }
 
@@ -322,6 +402,17 @@ function buildRadioReplyMarkup(url) {
     keyboard.push([{ text: "Слушать эфир", url }]);
   }
   return keyboard.length ? { inline_keyboard: keyboard } : undefined;
+}
+
+function buildAdminPanelReplyMarkup() {
+  return {
+    keyboard: [
+      [{ text: adminPanelLabels.question }, { text: adminPanelLabels.radio }],
+      [{ text: adminPanelLabels.tokens }],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+  };
 }
 
 function escapeHtml(value) {
@@ -351,6 +442,16 @@ function isQuestionUserAllowed(from = {}) {
   const telegramId = String(from.id || "");
   const username = String(from.username || "").trim().toLowerCase();
   return allowedTelegramIds.includes(telegramId) || Boolean(username && allowedUsernames.includes(username));
+}
+
+function isBotAdmin(from = {}) {
+  const telegramId = String(from.id || "");
+  const username = String(from.username || "").trim().toLowerCase();
+  return adminTelegramIds.includes(telegramId) || Boolean(username && adminUsernames.includes(username));
+}
+
+function isAdminPanelText(text, label) {
+  return String(text || "").trim().toLowerCase() === String(label || "").trim().toLowerCase();
 }
 
 function isOutOfQuestions(user = {}) {
@@ -590,6 +691,258 @@ async function notifyAdmins(text) {
   }
 }
 
+function scheduleAiUsageNotification(attempt = 1) {
+  checkAiUsageForNotification().then(() => {
+    setTimeout(() => scheduleAiUsageNotification(1), aiUsageNotifyIntervalMs);
+  }).catch((error) => {
+    console.error(`ai usage notification error: ${error.message}`);
+    const nextAttempt = attempt + 1;
+    setTimeout(() => scheduleAiUsageNotification(nextAttempt), Math.min(60_000, 5_000 * nextAttempt));
+  });
+}
+
+async function checkAiUsageForNotification() {
+  const usage = await getAiUsage();
+  const warnings = getAiUsageWarnings(usage);
+  const state = await readJsonFile(aiUsageStatePath);
+  const warningKey = warnings.join("\n");
+  const now = Date.now();
+  const notifyAgainMs = 12 * 60 * 60_000;
+
+  if (!warnings.length) {
+    await writeJsonFile(aiUsageStatePath, {
+      status: "ok",
+      warningKey: "",
+      lastCheckedAt: new Date().toISOString(),
+      lastNotifiedAt: state.lastNotifiedAt || 0,
+    });
+    return;
+  }
+
+  const shouldNotify = state.warningKey !== warningKey
+    || now - Number(state.lastNotifiedAt || 0) > notifyAgainMs;
+  if (shouldNotify) {
+    await notifyAdmins(formatAiUsageReport(usage, warnings));
+  }
+
+  await writeJsonFile(aiUsageStatePath, {
+    status: "warning",
+    warningKey,
+    warnings,
+    lastCheckedAt: new Date().toISOString(),
+    lastNotifiedAt: shouldNotify ? now : state.lastNotifiedAt || 0,
+  });
+}
+
+async function getAiUsage() {
+  try {
+    const usage = await radioGet("/api/listeners/ai-usage");
+    if (usage?.deepseek || usage?.elevenlabs) return usage;
+  } catch (error) {
+    console.error(`radio ai usage fallback: ${error.message}`);
+  }
+
+  const [deepseek, elevenlabs] = await Promise.all([
+    getDeepSeekUsage(),
+    getElevenLabsUsage(),
+  ]);
+  return { deepseek, elevenlabs, checkedAt: new Date().toISOString() };
+}
+
+async function getDeepSeekUsage() {
+  if (!deepseekConfig.apiKey) {
+    return { service: "deepseek", ok: false, configured: false, reason: "DEEPSEEK_API_KEY is empty" };
+  }
+
+  try {
+    const response = await fetchWithTimeout(getDeepSeekBalanceUrl(), {
+      headers: {
+        "Authorization": `Bearer ${deepseekConfig.apiKey}`,
+        "Accept": "application/json",
+      },
+    }, 20_000);
+    const text = await response.text();
+    if (!response.ok) {
+      return { service: "deepseek", ok: false, configured: true, reason: `${response.status}: ${summarizeResponse(text)}` };
+    }
+    const payload = parseJson(text);
+    const balances = Array.isArray(payload.balance_infos) ? payload.balance_infos : [];
+    return {
+      service: "deepseek",
+      ok: true,
+      configured: true,
+      isAvailable: Boolean(payload.is_available),
+      balances: balances.map((item) => ({
+        currency: String(item.currency || ""),
+        total: parseMoney(item.total_balance),
+        granted: parseMoney(item.granted_balance),
+        toppedUp: parseMoney(item.topped_up_balance),
+      })),
+    };
+  } catch (error) {
+    return { service: "deepseek", ok: false, configured: true, reason: error.message };
+  }
+}
+
+async function getElevenLabsUsage() {
+  if (!elevenlabsConfig.apiKey) {
+    return { service: "elevenlabs", ok: false, configured: false, reason: "ELEVENLABS_API_KEY is empty" };
+  }
+
+  try {
+    const response = await fetchWithTimeout(`${normalizeBaseUrl(elevenlabsConfig.baseUrl)}/v1/user/subscription`, {
+      headers: {
+        "xi-api-key": elevenlabsConfig.apiKey,
+        "Accept": "application/json",
+      },
+    }, 20_000);
+    const text = await response.text();
+    if (!response.ok) {
+      return { service: "elevenlabs", ok: false, configured: true, reason: `${response.status}: ${summarizeResponse(text)}` };
+    }
+    const payload = parseJson(text);
+    const used = Number(payload.character_count);
+    const limit = Number(payload.character_limit);
+    const remaining = Number.isFinite(used) && Number.isFinite(limit) ? Math.max(0, limit - used) : null;
+    return {
+      service: "elevenlabs",
+      ok: true,
+      configured: true,
+      tier: payload.tier || null,
+      status: payload.status || null,
+      used: Number.isFinite(used) ? used : null,
+      limit: Number.isFinite(limit) ? limit : null,
+      remaining,
+      remainingPercent: Number.isFinite(remaining) && limit > 0 ? (remaining / limit) * 100 : null,
+      resetAt: payload.next_character_count_reset_unix
+        ? new Date(Number(payload.next_character_count_reset_unix) * 1000).toISOString()
+        : null,
+    };
+  } catch (error) {
+    return { service: "elevenlabs", ok: false, configured: true, reason: error.message };
+  }
+}
+
+function getAiUsageWarnings(usage) {
+  const warnings = [];
+  const elevenlabs = usage.elevenlabs || {};
+  if (elevenlabs.ok && Number.isFinite(elevenlabs.remainingPercent) && elevenlabs.remainingPercent <= aiUsageNotifyThresholdPercent) {
+    warnings.push(`ElevenLabs осталось ${formatPercent(elevenlabs.remainingPercent)} символов от лимита`);
+  }
+  if (elevenlabs.configured && !elevenlabs.ok) {
+    warnings.push(`ElevenLabs не отвечает: ${elevenlabs.reason || "unknown error"}`);
+  }
+
+  const deepseek = usage.deepseek || {};
+  if (deepseek.ok && deepseek.isAvailable === false) {
+    warnings.push("DeepSeek пометил баланс как недоступный");
+  }
+  if (deepseek.ok) {
+    for (const balance of deepseek.balances || []) {
+      if (Number.isFinite(balance.total) && balance.total <= 0) {
+        warnings.push(`DeepSeek баланс ${balance.currency || ""} равен нулю`);
+      }
+    }
+  }
+  if (deepseek.configured && !deepseek.ok) {
+    warnings.push(`DeepSeek не отвечает: ${deepseek.reason || "unknown error"}`);
+  }
+  return warnings;
+}
+
+function formatAiUsageReport(usage, warnings = getAiUsageWarnings(usage)) {
+  const lines = [
+    "Остатки генерации:",
+    "",
+    formatElevenLabsUsage(usage.elevenlabs),
+    "",
+    formatDeepSeekUsage(usage.deepseek),
+  ];
+  if (warnings.length) {
+    lines.push("", "Предупреждения:", ...warnings.map((item) => `- ${item}`));
+  }
+  lines.push("", `Проверено: ${formatDateTime(usage.checkedAt)}`);
+  return lines.join("\n");
+}
+
+function formatElevenLabsUsage(usage = {}) {
+  if (!usage.configured) return "Аудио ElevenLabs: ключ не задан.";
+  if (!usage.ok) return `Аудио ElevenLabs: ошибка проверки (${usage.reason || "unknown error"}).`;
+  const remaining = usage.remaining === null ? "неизвестно" : formatInteger(usage.remaining);
+  const limit = usage.limit === null ? "неизвестно" : formatInteger(usage.limit);
+  const used = usage.used === null ? "неизвестно" : formatInteger(usage.used);
+  const percent = usage.remainingPercent === null ? "" : ` (${formatPercent(usage.remainingPercent)} осталось)`;
+  const reset = usage.resetAt ? `\nСброс лимита: ${formatDateTime(usage.resetAt)}` : "";
+  return [
+    `Аудио ElevenLabs: осталось ${remaining} из ${limit} символов${percent}.`,
+    `Использовано: ${used}.`,
+    usage.tier ? `Тариф: ${usage.tier}.` : "",
+    reset,
+  ].filter(Boolean).join("\n");
+}
+
+function formatDeepSeekUsage(usage = {}) {
+  if (!usage.configured) return "Текст DeepSeek: ключ не задан.";
+  if (!usage.ok) return `Текст DeepSeek: ошибка проверки (${usage.reason || "unknown error"}).`;
+  const balances = usage.balances?.length
+    ? usage.balances.map((item) => {
+      const currency = item.currency || "";
+      return `- ${currency}: всего ${formatMoney(item.total)}, бонус ${formatMoney(item.granted)}, пополнение ${formatMoney(item.toppedUp)}`;
+    }).join("\n")
+    : "- баланс не вернулся от API";
+  return [
+    `Текст DeepSeek: ${usage.isAvailable ? "баланс доступен" : "баланс недоступен"}.`,
+    "DeepSeek показывает денежный баланс, а не остаток токенов:",
+    balances,
+  ].join("\n");
+}
+
+function getDeepSeekBalanceUrl() {
+  if (deepseekConfig.balanceUrl) return deepseekConfig.balanceUrl;
+  const url = new URL(deepseekConfig.url);
+  url.pathname = "/user/balance";
+  url.search = "";
+  return url.toString();
+}
+
+function parseMoney(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function formatMoney(value) {
+  return Number.isFinite(value) ? value.toFixed(4).replace(/\.?0+$/, "") : "неизвестно";
+}
+
+function formatPercent(value) {
+  return `${Math.max(0, Number(value) || 0).toFixed(1).replace(/\.0$/, "")}%`;
+}
+
+function formatInteger(value) {
+  return new Intl.NumberFormat("ru-RU").format(Math.max(0, Math.round(Number(value) || 0)));
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "неизвестно";
+  return date.toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
+}
+
+function parseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+function summarizeResponse(text) {
+  const value = String(text || "").replace(/\s+/g, " ").trim();
+  if (!value) return "empty response";
+  const payload = parseJson(value);
+  return String(payload.detail?.message || payload.message || payload.error || value).slice(0, 300);
+}
+
 async function readPublicUrlHealthState() {
   try {
     return JSON.parse(await fs.promises.readFile(publicUrlHealthStatePath, "utf8"));
@@ -601,6 +954,19 @@ async function readPublicUrlHealthState() {
 async function writePublicUrlHealthState(state) {
   await fs.promises.mkdir(path.dirname(publicUrlHealthStatePath), { recursive: true });
   await fs.promises.writeFile(publicUrlHealthStatePath, JSON.stringify(state, null, 2), "utf8");
+}
+
+async function readJsonFile(filePath) {
+  try {
+    return JSON.parse(await fs.promises.readFile(filePath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+async function writeJsonFile(filePath, payload) {
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.promises.writeFile(filePath, JSON.stringify(payload, null, 2), "utf8");
 }
 
 function clampNumber(value, min, max, fallback) {
