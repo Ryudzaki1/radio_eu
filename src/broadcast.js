@@ -119,7 +119,7 @@ class BroadcastStream {
     });
     if (this.currentPlayItem && this.activeMusicProcess) {
       this.interruptMusicAfterCurrent = true;
-    } else if (this.activeLiveProcess && this.clients.size > 0 && Date.now() >= this.nextVoiceAllowedAt) {
+    } else if (this.activeLiveProcess && Date.now() >= this.nextVoiceAllowedAt) {
       this.liveInterruptedForMusic = true;
       this.activeLiveProcess.kill("SIGTERM");
     }
@@ -170,7 +170,7 @@ class BroadcastStream {
   }
 
   interruptLiveForQueuedContent() {
-    if (!this.activeLiveProcess || this.clients.size <= 0) return;
+    if (!this.activeLiveProcess) return;
     const voiceReady = this.queue.length > 0 && Date.now() >= this.nextVoiceAllowedAt;
     const musicReady = this.musicQueue.length > 0;
     if (!voiceReady && !musicReady) {
@@ -183,12 +183,12 @@ class BroadcastStream {
 
   scheduleVoiceReadyInterrupt() {
     this.clearVoiceReadyInterrupt();
-    if (!this.queue.length || this.clients.size <= 0 || this.currentPlayItem || this.activeMusicProcess) return;
+    if (!this.queue.length || this.currentPlayItem || this.activeMusicProcess) return;
 
     const delayMs = Math.max(0, this.nextVoiceAllowedAt - Date.now());
     this.voiceReadyInterruptTimer = setTimeout(() => {
       this.voiceReadyInterruptTimer = null;
-      if (!this.queue.length || this.clients.size <= 0 || this.currentPlayItem || this.activeMusicProcess) return;
+      if (!this.queue.length || this.currentPlayItem || this.activeMusicProcess) return;
       if (Date.now() < this.nextVoiceAllowedAt) {
         this.scheduleVoiceReadyInterrupt();
         return;
@@ -354,12 +354,9 @@ class BroadcastStream {
       }
 
       this.currentTrackIndex %= tracks.length;
-      const canPlayVoice = this.queue.length > 0 && this.clients.size > 0 && Date.now() >= this.nextVoiceAllowedAt;
-      if (this.queue.length > 0 && this.clients.size === 0) {
-        this.updateStatus({ mode: "voice_waiting_listener", title: "Voice queued, waiting for listener", queueLength: this.queue.length });
-      }
+      const canPlayVoice = this.queue.length > 0 && Date.now() >= this.nextVoiceAllowedAt;
 
-      if (this.musicQueue.length > 0 && this.clients.size > 0) {
+      if (this.musicQueue.length > 0) {
         await this.streamMusicQueue(tracks);
         if (!this.running || token !== this.loopToken) break;
         this.updateStatus({ mode: "music", title: "Music playlist", queueLength: this.queue.length, musicQueueLength: this.getPublicMusicQueueLength(), musicQueue: this.getPublicMusicQueue(), currentPlay: null });
@@ -376,10 +373,6 @@ class BroadcastStream {
         this.updateStatus({ mode: "music_between_voice", title: "Music between voice items", queueLength: this.queue.length, musicQueueLength: this.getPublicMusicQueueLength() });
         this.scheduleVoiceReadyInterrupt();
         continue;
-      }
-
-      if (this.musicQueue.length > 0 && this.clients.size === 0) {
-        this.updateStatus({ mode: "music_insert_waiting_listener", title: "Music insert queued, waiting for listener", queueLength: this.queue.length, musicQueueLength: this.getPublicMusicQueueLength(), musicQueue: this.getPublicMusicQueue() });
       }
 
       await this.streamMusicSegment(tracks);
@@ -543,7 +536,7 @@ class BroadcastStream {
         await this.streamSingleMusic(current.musicPath, playStart, middleDuration, current.title);
       }
 
-      const shouldBridgeVoice = this.queue.length > 0 && this.clients.size > 0;
+      const shouldBridgeVoice = this.queue.length > 0;
       if (shouldBridgeVoice) {
         live = await this.getLiveState(tracks, live.index, live.offset);
         fadeSeconds = this.pickFadeSeconds(currentDuration, live.duration - live.offset);
@@ -591,7 +584,7 @@ class BroadcastStream {
         if (this.queue.length > 0) {
           this.voiceBridgeAfterMusicInterrupt = true;
         }
-        const shouldPlayTrailingVoice = this.queue.length > 0 && this.clients.size > 0;
+        const shouldPlayTrailingVoice = this.queue.length > 0;
         if (shouldPlayTrailingVoice) {
           this.voiceBridgeAfterMusicInterrupt = false;
           this.currentPlayItem = null;
