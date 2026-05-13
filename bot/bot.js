@@ -43,6 +43,7 @@ if (!token || !listenerApiToken) {
 
 let offset = 0;
 const pendingAdminQuestionChatIds = new Set();
+const clearedReplyKeyboardChatIds = new Set();
 
 scheduleRadioLinkNotification();
 schedulePublicUrlHealthCheck();
@@ -324,6 +325,10 @@ async function startAdminQuestionMode(chatId) {
 }
 
 async function sendAdminPanel(chatId, publicUrl, options = {}) {
+  if (!clearedReplyKeyboardChatIds.has(String(chatId))) {
+    clearedReplyKeyboardChatIds.add(String(chatId));
+    await send(chatId, "Старая клавиатура убрана. Ниже новая панель кнопок.", { remove_keyboard: true });
+  }
   await send(chatId, [
     "Админ-панель Sweetie Fox.",
     "Выбери действие кнопкой ниже или используй команды: /question, /radio, /tokens.",
