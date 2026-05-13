@@ -208,6 +208,71 @@ class BroadcastStream {
     return cleared;
   }
 
+  resetBroadcast(reason = "admin_reset") {
+    const clearedVoice = this.queue.length;
+    const clearedMusic = this.musicQueue.length + this.activeMusicItems.length;
+    this.queue = [];
+    this.musicQueue = [];
+    this.activeMusicItems = [];
+    this.activeMusicIndex = -1;
+    this.currentPlayItem = null;
+    this.currentMusic = null;
+    this.liveInterruptedForMusic = false;
+    this.interruptMusicAfterCurrent = false;
+    this.musicInterrupted = false;
+    this.voiceBridgeAfterMusicInterrupt = false;
+    this.nextVoiceAllowedAt = 0;
+    this.clearVoiceReadyInterrupt();
+    this.stopActiveProcesses();
+    this.updateStatus({
+      mode: "resetting",
+      title: "Broadcast reset",
+      queueLength: 0,
+      musicQueueLength: 0,
+      musicQueue: [],
+      currentPlay: null,
+    });
+    this.log("broadcast_reset", { reason, clearedVoice, clearedMusic });
+    this.start();
+    return { clearedVoice, clearedMusic, stream: this.getStatus() };
+  }
+
+  stopBroadcast(reason = "admin_stop") {
+    const clearedVoice = this.queue.length;
+    const clearedMusic = this.musicQueue.length + this.activeMusicItems.length;
+    this.running = false;
+    this.queue = [];
+    this.musicQueue = [];
+    this.activeMusicItems = [];
+    this.activeMusicIndex = -1;
+    this.currentPlayItem = null;
+    this.currentMusic = null;
+    this.clearVoiceReadyInterrupt();
+    this.stopActiveProcesses();
+    for (const client of this.clients) {
+      client.end();
+    }
+    this.clients.clear();
+    this.updateStatus({
+      mode: "stopped",
+      title: "Broadcast stopped",
+      queueLength: 0,
+      musicQueueLength: 0,
+      musicQueue: [],
+      currentPlay: null,
+    });
+    this.log("broadcast_stopped", { reason, clearedVoice, clearedMusic });
+    return { clearedVoice, clearedMusic, stream: this.getStatus() };
+  }
+
+  stopActiveProcesses() {
+    for (const process of [this.activeLiveProcess, this.activeMusicProcess]) {
+      if (process && !process.killed) process.kill("SIGTERM");
+    }
+    this.activeLiveProcess = null;
+    this.activeMusicProcess = null;
+  }
+
   getStatus() {
     return {
       ...this.lastStatus,

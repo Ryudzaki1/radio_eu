@@ -47,37 +47,61 @@
           </div>
         </div>
 
-        <div class="now">
-          <span class="label">Сейчас в эфире</span>
-          <strong id="nowTitle">Загрузка плейлиста</strong>
-          <span id="nowMeta">Музыка из локальной папки</span>
+        <div class="air-stage">
+          <div id="hostScene" class="host-scene admin-host-scene is-listening">
+            <div class="host-portrait">
+              <img id="hostImage" class="host-image" src="/assets/host-mouth-closed.webp" alt="Ведущая эфира">
+            </div>
+            <div class="host-caption">
+              <span id="hostMood">CHILL MODE</span>
+              <strong>SweetieFox</strong>
+              <p id="hostTrackTitle">Эфир готовится</p>
+            </div>
+          </div>
+
+          <div class="air-now-stack">
+            <div class="now">
+              <span class="label">Сейчас в эфире</span>
+              <strong id="nowTitle">Загрузка плейлиста</strong>
+              <span id="nowMeta">Музыка из локальной папки</span>
+            </div>
+
+            <div id="musicProgress" class="music-progress" aria-live="polite">
+              <div class="progress-head">
+                <span id="progressKind">Музыка</span>
+                <strong id="progressTitle">Ожидаем трек</strong>
+              </div>
+              <div class="progress-bar" aria-hidden="true">
+                <span id="progressFill"></span>
+              </div>
+              <div class="progress-times">
+                <span id="progressElapsed">0:00</span>
+                <span id="progressRemaining">-0:00</span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div id="musicProgress" class="music-progress" aria-live="polite">
-          <div class="progress-head">
-            <span id="progressKind">Музыка</span>
-            <strong id="progressTitle">Ожидаем трек</strong>
-          </div>
-          <div class="progress-bar" aria-hidden="true">
-            <span id="progressFill"></span>
-          </div>
-          <div class="progress-times">
-            <span id="progressElapsed">0:00</span>
-            <span id="progressRemaining">-0:00</span>
-          </div>
-        </div>
-
-          <audio id="audio" preload="auto" playsinline></audio>
+        <audio id="audio" preload="auto" playsinline></audio>
 
         <div class="controls public-controls">
-          <button id="playButton" class="primary" type="button" aria-label="Старт">▶</button>
-          <button id="nextButton" type="button">Переподключить поток</button>
-          <button id="refreshButton" type="button">Обновить список треков</button>
-          <button id="syncMusicButton" type="button">Синхронизировать музыку</button>
+          <button id="playButton" class="primary" type="button" aria-label="Слушать эфир">▶</button>
+          <button id="resetBroadcastButton" type="button">Сбросить и обновить эфир</button>
+          <button id="stopBroadcastButton" class="danger-button" type="button">Остановить эфир</button>
           <label class="volume">
             <span>Общая громкость</span>
             <input id="volume" type="range" min="0" max="1" step="0.01" value="0.72">
           </label>
+        </div>
+
+        <div class="air-history-panel">
+          <div class="section-head compact">
+            <div>
+              <h2>История воспроизведения</h2>
+              <p>Последние события эфира с временем сервера.</p>
+            </div>
+          </div>
+          <div id="airHistory" class="air-history" aria-live="polite"></div>
         </div>
         </div>
 

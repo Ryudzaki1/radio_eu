@@ -751,6 +751,109 @@ input[type="range"] {
   min-width: 0;
 }
 
+.air-stage {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.admin-host-scene {
+  min-height: 260px;
+  aspect-ratio: auto;
+}
+
+.host-portrait {
+  position: absolute;
+  inset: 0;
+}
+
+.host-caption {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(10, 12, 18, 0.68);
+  color: #fff;
+  backdrop-filter: blur(10px);
+}
+
+.host-caption span {
+  color: #9be7ff;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.host-caption strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.host-caption p {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.air-now-stack {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.air-history-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+}
+
+.air-history {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.air-history-item {
+  display: grid;
+  grid-template-columns: 58px minmax(120px, 0.9fr) minmax(0, 1.4fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-solid);
+}
+
+.air-history-item time {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.air-history-item strong,
+.air-history-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.air-history-item span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .section-head {
   margin-bottom: 14px;
 }
@@ -1501,6 +1604,14 @@ html[data-theme="dark"] audio {
     grid-template-columns: 1fr;
   }
 
+  .air-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-host-scene {
+    min-height: 340px;
+  }
+
   .admin-panel[data-panel="air"] .admin-monitor:first-child {
     grid-row: auto;
   }
@@ -1580,6 +1691,19 @@ html[data-theme="dark"] audio {
 
   .volume {
     min-width: 0;
+  }
+
+  .admin-host-scene {
+    min-height: 260px;
+  }
+
+  .air-history-item {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .air-history-item span {
+    grid-column: 2;
+    white-space: normal;
   }
 
   .host-scene {
