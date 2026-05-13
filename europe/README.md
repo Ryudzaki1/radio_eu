@@ -25,7 +25,7 @@ The EU Telegram bot talks to the Russia radio API through WireGuard:
 
 ```text
 RADIO_INTERNAL_URL=http://10.77.0.2:18082
-PUBLIC_RADIO_URL=http://111.88.144.171
+PUBLIC_RADIO_URL=http://111.88.156.237
 ```
 
 Run only the EU bot from the full app checkout:
