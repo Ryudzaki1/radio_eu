@@ -1,5 +1,6 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
+const dns = require("node:dns").promises;
 const fs = require("node:fs");
 const path = require("node:path");
 const { URL } = require("node:url");
@@ -59,7 +60,7 @@ function createServer(config) {
       }
 
       if (requiresAdmin(url.pathname) && !isAdminAuthorized(request, config)) {
-        if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/admin.html") {
+        if ((request.method === "GET" || request.method === "HEAD") && isAdminPagePath(url.pathname)) {
           response.writeHead(303, { Location: "/admin-login.html" });
           response.end();
         } else {
@@ -68,6 +69,11 @@ function createServer(config) {
           });
           response.end(JSON.stringify({ error: "Admin auth required", loginUrl: "/admin-login.html" }));
         }
+        return;
+      }
+
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/simsim") {
+        await sendFile(request, response, path.join(config.rootDir, "admin.html"), staticTypes.get(".html"));
         return;
       }
 
@@ -140,6 +146,15 @@ function createServer(config) {
           serverNow: Date.now(),
           stream: broadcast.getStatus(),
         });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/public-network/status") {
+        if (!isListenerApiAuthorized(request, config)) {
+          await sendJson(response, 403, { error: "Listener API forbidden" });
+          return;
+        }
+        await sendJson(response, 200, await getPublicNetworkStatus(config));
         return;
       }
 
@@ -537,7 +552,7 @@ async function resetGeneratedAudio(config) {
 }
 
 function requiresAdmin(pathname) {
-  return pathname === "/admin.html"
+  return isAdminPagePath(pathname)
     || pathname === "/admin.js"
     || pathname === "/api/health/ai"
     || pathname.startsWith("/api/admin/")
@@ -547,6 +562,10 @@ function requiresAdmin(pathname) {
     || pathname === "/api/greeting"
     || pathname === "/api/fact"
     || pathname === "/api/farewell";
+}
+
+function isAdminPagePath(pathname) {
+  return pathname === "/admin.html" || pathname === "/simsim";
 }
 
 function isAdminAuthorized(request, config) {
@@ -575,7 +594,7 @@ async function handleAdminLogin(request, response, config) {
 
   response.writeHead(303, {
     "Set-Cookie": createAdminSessionCookie(config),
-    Location: "/admin.html",
+    Location: "/simsim",
   });
   response.end();
 }
@@ -754,6 +773,56 @@ async function listRecentRadioVoices(config, since) {
 
   return [...byId.values()]
     .sort((a, b) => Date.parse(a.emittedAt || "") - Date.parse(b.emittedAt || ""));
+}
+
+async function getPublicNetworkStatus(config) {
+  const publicUrl = new URL(config.publicRadioUrl);
+  const [dnsA, outboundIp] = await Promise.all([
+    resolveDnsA(publicUrl.hostname),
+    getOutboundPublicIp(),
+  ]);
+  return {
+    ok: true,
+    publicRadioUrl: config.publicRadioUrl,
+    hostname: publicUrl.hostname,
+    dnsA,
+    publicIp: outboundIp,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+async function resolveDnsA(hostname) {
+  try {
+    return await dns.resolve4(hostname);
+  } catch {
+    return [];
+  }
+}
+
+async function getOutboundPublicIp() {
+  const urls = [
+    "https://api.ipify.org",
+    "https://ifconfig.me/ip",
+  ];
+  for (const url of urls) {
+    try {
+      const response = await fetchWithTimeout(url, {}, 8000);
+      if (!response.ok) continue;
+      const text = (await response.text()).trim();
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(text)) return text;
+    } catch {}
+  }
+  return "";
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 30_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function sanitizePublicVoiceEvent(data = {}) {

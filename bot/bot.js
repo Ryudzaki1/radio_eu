@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const dns = require("node:dns").promises;
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const telegramApiBaseUrl = normalizeBaseUrl(process.env.TELEGRAM_API_BASE_URL || "https://api.telegram.org");
@@ -9,8 +10,12 @@ const listenerApiToken = process.env.LISTENER_API_TOKEN || "";
 const allowedTelegramIds = parseList(process.env.BOT_ALLOWED_TELEGRAM_IDS);
 const allowedUsernames = parseList(process.env.BOT_ALLOWED_USERNAMES).map((item) => item.toLowerCase());
 const notifyChatIds = parseList(process.env.BOT_NOTIFY_CHAT_IDS);
+const adminTelegramIds = parseList(process.env.BOT_ADMIN_TELEGRAM_IDS);
 const linkStatePath = process.env.BOT_LINK_STATE_PATH || "";
 const publicUrlStatePath = process.env.PUBLIC_URL_STATE_PATH || "/cache/config/public-url.json";
+const publicUrlHealthStatePath = process.env.PUBLIC_URL_HEALTH_STATE_PATH || "/cache/config/public-url-health.json";
+const publicUrlHealthIntervalMs = clampNumber(process.env.PUBLIC_URL_HEALTH_INTERVAL_MS, 60_000, 24 * 60 * 60_000, 5 * 60_000);
+const publicServerIp = String(process.env.PUBLIC_SERVER_IP || process.env.RU_PUBLIC_IP || "").trim();
 const listenerStorePath = process.env.LISTENER_STORE_PATH || "/cache/config/listeners.json";
 
 if (!token || !listenerApiToken) {
@@ -21,6 +26,7 @@ if (!token || !listenerApiToken) {
 let offset = 0;
 
 scheduleRadioLinkNotification();
+schedulePublicUrlHealthCheck();
 setupBotInterface().catch((error) => console.error(`bot interface error: ${error.message}`));
 
 poll().catch((error) => {
@@ -246,6 +252,16 @@ async function radio(requestPath, body) {
   return response.json();
 }
 
+async function radioGet(requestPath) {
+  const response = await fetchWithTimeout(`${radioUrl}${requestPath}`, {
+    method: "GET",
+    headers: {
+      "X-Radio-Listener-Token": listenerApiToken,
+    },
+  }, 20_000);
+  return response.json();
+}
+
 async function telegram(method, body) {
   const response = await fetchWithTimeout(`${telegramApiBaseUrl}/bot${token}/${method}`, {
     method: "POST",
@@ -346,6 +362,7 @@ function formatRemaining(user = {}) {
 }
 
 async function getPublicRadioUrl() {
+  if (isValidPublicUrl(publicRadioUrl)) return publicRadioUrl;
   try {
     const payload = JSON.parse(await fs.promises.readFile(publicUrlStatePath, "utf8"));
     if (isValidPublicUrl(payload.url)) return payload.url;
@@ -393,7 +410,7 @@ async function notifyRadioLinkChange() {
 
   if (previousUrl === currentPublicUrl) return;
 
-  const recipients = await getLinkNotificationChatIds();
+  const recipients = await getAdminNotificationChatIds();
   for (const chatId of recipients) {
     await sendRadioLink(chatId, [
       "Ссылка на эфир обновилась.",
@@ -452,6 +469,144 @@ async function getLinkNotificationChatIds() {
     }
   } catch {}
   return [...ids].filter(Boolean);
+}
+
+async function getAdminNotificationChatIds() {
+  const ids = new Set([...adminTelegramIds, ...notifyChatIds]);
+  try {
+    const state = JSON.parse(await fs.promises.readFile(linkStatePath, "utf8"));
+    for (const chatId of state.notifiedChatIds || []) {
+      if (adminTelegramIds.includes(String(chatId)) || notifyChatIds.includes(String(chatId))) {
+        ids.add(String(chatId));
+      }
+    }
+  } catch {}
+  return [...ids].filter(Boolean);
+}
+
+function schedulePublicUrlHealthCheck(attempt = 1) {
+  checkPublicUrlHealth().then(() => {
+    setTimeout(() => schedulePublicUrlHealthCheck(1), publicUrlHealthIntervalMs);
+  }).catch((error) => {
+    console.error(`public url health check error: ${error.message}`);
+    const nextAttempt = attempt + 1;
+    setTimeout(() => schedulePublicUrlHealthCheck(nextAttempt), Math.min(60_000, 5_000 * nextAttempt));
+  });
+}
+
+async function checkPublicUrlHealth() {
+  const url = await getPublicRadioUrl();
+  if (!isValidPublicUrl(url)) return;
+
+  const publicUrl = new URL(url);
+  const [dnsA, httpCheck, ruNetwork] = await Promise.all([
+    resolveDnsA(publicUrl.hostname),
+    checkHttpUrl(url),
+    radioGet("/api/public-network/status").catch((error) => ({ error: error.message })),
+  ]);
+
+  const issues = [];
+  const actualPublicIp = String(ruNetwork.publicIp || "").trim();
+  const expectedIp = publicServerIp || actualPublicIp;
+
+  if (!dnsA.length) {
+    issues.push(`DNS A for ${publicUrl.hostname} is empty`);
+  }
+  if (expectedIp && !dnsA.includes(expectedIp)) {
+    issues.push(`DNS A does not include server IP ${expectedIp}; current DNS: ${dnsA.join(", ") || "none"}`);
+  }
+  if (actualPublicIp && publicServerIp && actualPublicIp !== publicServerIp) {
+    issues.push(`RU server public IP changed: env=${publicServerIp}, actual=${actualPublicIp}`);
+  }
+  if (!httpCheck.ok) {
+    issues.push(`Public URL is not open: ${httpCheck.error || `HTTP ${httpCheck.status}`}`);
+  }
+  if (ruNetwork.error) {
+    issues.push(`RU internal network status failed: ${ruNetwork.error}`);
+  }
+
+  const state = await readPublicUrlHealthState();
+  const issueKey = issues.join("\n");
+  const now = Date.now();
+  const notifyAgainMs = 60 * 60_000;
+  const shouldNotifyProblem = issues.length
+    && (state.issueKey !== issueKey || now - Number(state.lastNotifiedAt || 0) > notifyAgainMs);
+  const shouldNotifyRecovery = !issues.length && state.status === "broken";
+
+  if (shouldNotifyProblem) {
+    await notifyAdmins([
+      "Radio public URL problem",
+      `URL: ${url}`,
+      `DNS A: ${dnsA.join(", ") || "none"}`,
+      `RU public IP: ${actualPublicIp || "unknown"}`,
+      "",
+      ...issues.map((issue) => `- ${issue}`),
+    ].join("\n"));
+  } else if (shouldNotifyRecovery) {
+    await notifyAdmins([
+      "Radio public URL recovered",
+      `URL: ${url}`,
+      `DNS A: ${dnsA.join(", ") || "none"}`,
+      `RU public IP: ${actualPublicIp || "unknown"}`,
+    ].join("\n"));
+  }
+
+  await writePublicUrlHealthState({
+    status: issues.length ? "broken" : "ok",
+    url,
+    dnsA,
+    publicIp: actualPublicIp,
+    issueKey,
+    issues,
+    checkedAt: new Date().toISOString(),
+    lastNotifiedAt: shouldNotifyProblem ? now : state.lastNotifiedAt || 0,
+  });
+}
+
+async function resolveDnsA(hostname) {
+  try {
+    return await dns.resolve4(hostname);
+  } catch {
+    return [];
+  }
+}
+
+async function checkHttpUrl(url) {
+  try {
+    let response = await fetchWithTimeout(url, { method: "HEAD" }, 20_000);
+    if (response.status === 405) {
+      response = await fetchWithTimeout(url, { method: "GET" }, 20_000);
+    }
+    return { ok: response.status >= 200 && response.status < 400, status: response.status };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+async function notifyAdmins(text) {
+  const recipients = await getAdminNotificationChatIds();
+  for (const chatId of recipients) {
+    await send(chatId, text);
+  }
+}
+
+async function readPublicUrlHealthState() {
+  try {
+    return JSON.parse(await fs.promises.readFile(publicUrlHealthStatePath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+async function writePublicUrlHealthState(state) {
+  await fs.promises.mkdir(path.dirname(publicUrlHealthStatePath), { recursive: true });
+  await fs.promises.writeFile(publicUrlHealthStatePath, JSON.stringify(state, null, 2), "utf8");
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
 }
 
 function delay(ms) {

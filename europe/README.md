@@ -25,8 +25,12 @@ The EU Telegram bot talks to the Russia radio API through WireGuard:
 
 ```text
 RADIO_INTERNAL_URL=http://10.77.0.2:18082
-PUBLIC_RADIO_URL=http://111.88.156.237
+PUBLIC_RADIO_URL=https://radio.ryudzaki.website/
+PUBLIC_SERVER_IP=111.88.156.237
 ```
+
+The EU Telegram bot checks `PUBLIC_RADIO_URL`, DNS A records, and the RU node public IP through the private tunnel.
+Mismatch or public URL failure is sent only to admin Telegram IDs.
 
 Run only the EU bot from the full app checkout:
 

@@ -13,12 +13,13 @@ Role:
 Current test URL:
 
 ```text
-http://111.88.156.237/
-http://111.88.156.237/admin-login.html
-http://111.88.156.237/stream
+https://radio.ryudzaki.website/
+https://radio.ryudzaki.website/simsim
+https://radio.ryudzaki.website/stream
 ```
 
-When the domain is ready, point `radio.ryudzaki.website` to `111.88.156.237` with DNS-only mode.
+Keep `radio.ryudzaki.website` pointed to the current Yandex VM public IP with DNS-only mode.
+If the VM public IP changes, the Europe bot health check notifies admin Telegram IDs.
 
 Layout:
 

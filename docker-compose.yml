@@ -19,6 +19,7 @@ services:
       FACT_LOG_PATH: /cache/config/fact-log.json
       LISTENER_STORE_PATH: /cache/config/listeners.json
       PUBLIC_RADIO_URL: ${PUBLIC_RADIO_URL:-http://localhost:3000}
+      PUBLIC_SERVER_IP: ${PUBLIC_SERVER_IP:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       LISTENER_API_TOKEN: ${LISTENER_API_TOKEN}
@@ -44,6 +45,7 @@ services:
     environment:
       RADIO_INTERNAL_URL: http://radio:3000
       PUBLIC_RADIO_URL: ${PUBLIC_RADIO_URL:-http://localhost:3000}
+      PUBLIC_SERVER_IP: ${PUBLIC_SERVER_IP:-}
       TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
       LISTENER_API_TOKEN: ${LISTENER_API_TOKEN}
       BOT_ALLOWED_TELEGRAM_IDS: ${BOT_ALLOWED_TELEGRAM_IDS:-}
@@ -53,6 +55,8 @@ services:
       BOT_NOTIFY_CHAT_IDS: ${BOT_NOTIFY_CHAT_IDS:-}
       BOT_LINK_STATE_PATH: /cache/config/bot-link.json
       PUBLIC_URL_STATE_PATH: /cache/config/public-url.json
+      PUBLIC_URL_HEALTH_STATE_PATH: /cache/config/public-url-health.json
+      PUBLIC_URL_HEALTH_INTERVAL_MS: ${PUBLIC_URL_HEALTH_INTERVAL_MS:-300000}
       LISTENER_STORE_PATH: /cache/config/listeners.json
     volumes:
       - radio-cache:/cache

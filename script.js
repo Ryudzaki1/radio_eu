@@ -100,7 +100,7 @@ refreshButton?.addEventListener("click", async () => {
 syncMusicButton?.addEventListener("click", syncMusic);
 
 showAdminButton?.addEventListener("click", () => {
-  window.location.href = "/admin.html";
+  window.location.href = "/simsim";
 });
 
 audio?.addEventListener("play", () => {
