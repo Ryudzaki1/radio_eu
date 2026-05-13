@@ -1156,6 +1156,7 @@ input[type="range"] {
 }
 
 .help-tip {
+  position: relative;
   display: inline-grid;
   place-items: center;
   width: 18px;
@@ -1171,10 +1172,67 @@ input[type="range"] {
   background: var(--surface);
 }
 
+.help-tip::after {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  z-index: 20;
+  width: min(300px, 72vw);
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  content: attr(data-tooltip);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translate(-50%, 4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  visibility: hidden;
+  white-space: normal;
+}
+
+.help-tip::before {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  z-index: 21;
+  width: 10px;
+  height: 10px;
+  border-right: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--surface);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px) rotate(45deg);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  visibility: hidden;
+}
+
 .help-tip:hover,
 .help-tip:focus-visible {
   color: var(--text);
   border-color: var(--accent);
+}
+
+.help-tip:hover::after,
+.help-tip:focus-visible::after,
+.help-tip:hover::before,
+.help-tip:focus-visible::before {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  visibility: visible;
+}
+
+.help-tip:hover::before,
+.help-tip:focus-visible::before {
+  transform: translate(-50%, 0) rotate(45deg);
 }
 
 .voice-controls input:disabled,

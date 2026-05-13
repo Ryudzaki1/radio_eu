@@ -94,6 +94,7 @@ testFactButton?.addEventListener("click", () => enqueueAdminVoiceTest("/api/fact
 addTopicButton?.addEventListener("click", addTopic);
 addSubtopicButton?.addEventListener("click", addSubtopic);
 deleteTopicButton?.addEventListener("click", deleteSelectedTopic);
+initHelpTips();
 activeHostSelect?.addEventListener("change", () => {
   if (!currentConfig?.prompts) return;
   currentConfig.prompts.activeHostId = getActiveHostId();
@@ -113,6 +114,14 @@ topicNameInput?.addEventListener("input", () => {
 loadConfig();
 activateTab(getInitialTab(), { persist: false });
 window.setInterval(refreshTopicCycleStatus, 30_000);
+
+function initHelpTips() {
+  document.querySelectorAll(".help-tip[title]").forEach((tip) => {
+    tip.dataset.tooltip = tip.getAttribute("title") || "";
+    tip.setAttribute("tabindex", "0");
+    tip.removeAttribute("title");
+  });
+}
 
 async function loadConfig() {
   try {
