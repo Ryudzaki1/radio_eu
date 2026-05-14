@@ -1,3 +1,5 @@
+const crypto = require("node:crypto");
+
 let Pool;
 try {
   ({ Pool } = require("pg"));
@@ -68,11 +70,13 @@ async function recordBroadcastEvent(config, entry) {
 
   await client.query(
     `INSERT INTO broadcast_events (
-       event, category, status, title, source, source_file, topic, subtopic,
+       event_key, event, category, status, title, source, source_file, topic, subtopic,
        duration_seconds, position_seconds, started_at, ended_at, metadata
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     ON CONFLICT (event_key) DO NOTHING`,
     [
+      normalized.eventKey,
       normalized.event,
       normalized.category,
       normalized.status,
@@ -103,6 +107,14 @@ function normalizeBroadcastEvent(entry) {
   const createdAt = entry.ts ? new Date(entry.ts) : new Date();
 
   return {
+    eventKey: buildEventKey({
+      event,
+      title,
+      sourceFile,
+      durationSeconds: finiteNumberOrNull(entry.durationSeconds),
+      positionSeconds: finiteNumberOrNull(entry.positionSeconds),
+      startedAt: createdAt,
+    }),
     event,
     category,
     status,
@@ -117,6 +129,20 @@ function normalizeBroadcastEvent(entry) {
     endedAt: status === "ended" || status === "failed" || status === "cancelled" ? createdAt : null,
     metadata: entry,
   };
+}
+
+function buildEventKey(parts) {
+  return crypto
+    .createHash("sha256")
+    .update([
+      parts.event,
+      parts.startedAt.toISOString(),
+      parts.title || "",
+      parts.sourceFile || "",
+      parts.durationSeconds ?? "",
+      parts.positionSeconds ?? "",
+    ].join("|"))
+    .digest("hex");
 }
 
 function getBroadcastCategory(event) {
