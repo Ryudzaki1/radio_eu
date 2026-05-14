@@ -1096,6 +1096,9 @@ input[type="range"] {
   display: grid;
   grid-template-columns: minmax(230px, 320px) minmax(0, 1fr);
   gap: 16px;
+  min-height: 0;
+  max-height: clamp(460px, 58vh, 760px);
+  overflow: hidden;
 }
 
 .topic-cycle-panel {
@@ -1196,7 +1199,8 @@ input[type="range"] {
 }
 
 .topic-list {
-  max-height: 680px;
+  min-height: 0;
+  max-height: none;
   overflow: auto;
   display: grid;
   align-content: start;
@@ -1259,15 +1263,21 @@ input[type="range"] {
 
 .topic-detail {
   min-width: 0;
+  min-height: 0;
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 16px;
   align-content: start;
 }
 
 .subtopic-list {
+  min-height: 0;
+  overflow: auto;
   display: grid;
+  align-content: start;
   grid-template-columns: 1fr;
   gap: 10px;
+  padding-right: 4px;
 }
 
 .subtopic-chip {
@@ -1501,6 +1511,12 @@ input[type="range"] {
   align-items: end;
 }
 
+.dictor-actions {
+  position: relative;
+  z-index: 1;
+  margin: 16px 0 18px;
+}
+
 .broadcast-actions button,
 .dictor-actions button {
   min-height: 48px;
@@ -1525,6 +1541,12 @@ input[type="range"] {
   margin-top: 4px;
 }
 
+.audio-file-block-wide .archive-list {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .audio-files-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1534,8 +1556,11 @@ input[type="range"] {
 .audio-file-block {
   min-width: 0;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   align-content: start;
   gap: 12px;
+  max-height: clamp(420px, 58vh, 650px);
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-soft);
@@ -1544,6 +1569,7 @@ input[type="range"] {
 
 .audio-file-block-wide {
   grid-column: 1 / -1;
+  max-height: clamp(300px, 42vh, 460px);
 }
 
 .upload-action {
@@ -1571,15 +1597,21 @@ input[type="range"] {
 }
 
 .audio-file-list {
+  min-height: 0;
   display: grid;
   align-content: start;
   gap: 10px;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .audio-file-row {
   display: grid;
-  grid-template-columns: 42px minmax(180px, 1fr) minmax(180px, 280px) auto;
-  gap: 12px;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "number meta action"
+    "number player action";
+  gap: 8px 12px;
   align-items: center;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1588,13 +1620,25 @@ input[type="range"] {
 }
 
 .audio-file-number {
+  grid-area: number;
   color: var(--accent);
   font-weight: 900;
 }
 
+.audio-file-row .archive-meta {
+  grid-area: meta;
+}
+
 .audio-file-row audio,
 .voice-archive-list audio {
+  grid-area: player;
   width: 100%;
+  max-width: 360px;
+}
+
+.audio-file-row .danger-button {
+  grid-area: action;
+  align-self: center;
 }
 
 .archive-item {
@@ -1800,8 +1844,20 @@ html[data-theme="dark"] audio {
     grid-template-columns: 1fr;
   }
 
+  .audio-file-row {
+    grid-template-areas:
+      "number"
+      "meta"
+      "player"
+      "action";
+  }
+
   .audio-file-number {
-    display: none;
+    justify-self: start;
+  }
+
+  .audio-file-row audio {
+    max-width: none;
   }
 }
 
@@ -1861,6 +1917,15 @@ html[data-theme="dark"] audio {
 
   .topic-list {
     max-height: 320px;
+  }
+
+  .topic-editor {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .subtopic-list {
+    max-height: 420px;
   }
 
   .live-badge,
