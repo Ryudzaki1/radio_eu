@@ -132,6 +132,28 @@ CREATE TABLE IF NOT EXISTS broadcast_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS broadcast_air_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_key TEXT NOT NULL UNIQUE,
+  item_type TEXT NOT NULL CHECK (item_type IN ('live_track', 'play_track', 'host_voice', 'listener_question', 'system')),
+  status TEXT NOT NULL DEFAULT 'started' CHECK (status IN ('started', 'finished', 'failed', 'cancelled')),
+  title TEXT NOT NULL,
+  source TEXT,
+  source_file TEXT,
+  topic TEXT,
+  subtopic TEXT,
+  started_at TIMESTAMPTZ NOT NULL,
+  ended_at TIMESTAMPTZ,
+  duration_seconds NUMERIC(12, 3),
+  position_seconds NUMERIC(12, 3),
+  listener_question_id UUID REFERENCES listener_questions(id) ON DELETE SET NULL,
+  audio_asset_id UUID REFERENCES audio_assets(id) ON DELETE SET NULL,
+  broadcast_event_id UUID REFERENCES broadcast_events(id) ON DELETE SET NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_payment_orders_user_status ON payment_orders (telegram_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_listener_questions_status_priority ON listener_questions (status, priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_ready ON broadcast_jobs (status, scheduled_at, priority);
@@ -142,6 +164,9 @@ CREATE INDEX IF NOT EXISTS idx_broadcast_events_started ON broadcast_events (sta
 CREATE UNIQUE INDEX IF NOT EXISTS idx_broadcast_events_event_key ON broadcast_events (event_key);
 CREATE INDEX IF NOT EXISTS idx_broadcast_events_category_started ON broadcast_events (category, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_broadcast_events_source_file_started ON broadcast_events (source_file, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_broadcast_air_items_started ON broadcast_air_items (started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_broadcast_air_items_type_started ON broadcast_air_items (item_type, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_broadcast_air_items_status ON broadcast_air_items (status, started_at DESC);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
@@ -165,4 +190,8 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TRIGGER broadcast_jobs_set_updated_at
 BEFORE UPDATE ON broadcast_jobs
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER broadcast_air_items_set_updated_at
+BEFORE UPDATE ON broadcast_air_items
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();

@@ -30,14 +30,20 @@ proper migration command later.
   jobs.
 - `broadcast_events` - chronological live-air history: live tracks, play
   inserts, voice starts/ends, transitions, broadcast stop/restore events.
+- `broadcast_air_items` - clean human-readable on-air timeline. Use this table
+  for admin views, reports, and "what was on air" queries.
 - `ai_usage_events` - DeepSeek and ElevenLabs usage accounting.
-- `system_events` - audit trail for admin, bot, listener, and system actions.
+- `system_events` - audit trail for admin, bot, listener, and important system
+  actions. Routine broadcast events are intentionally not stored here.
 
 ## Broadcast event relationships
 
-`broadcast_events` is the main table for "what was on air". It stores the
-event time, category, title, source file, duration, topic/subtopic text and
-metadata.
+`broadcast_events` is the technical event stream. It stores raw broadcast
+events and remains useful for debugging.
+
+`broadcast_air_items` is the main table for "what was on air". It stores clean
+interval rows: music tracks, host voice blocks, listener questions, and system
+air items.
 
 Optional links are already reserved:
 
@@ -47,9 +53,17 @@ Optional links are already reserved:
 - `broadcast_job_id` -> `broadcast_jobs.id` for the future durable queue.
 
 For now, these optional IDs are usually empty because the current broadcast
-runtime still uses in-memory queues and JSON files. The table is still useful
-immediately because it is filled from the same broadcast events that feed the
-admin history.
+runtime still uses in-memory queues and JSON files. They are reserved for the
+paid-question and durable-queue migration.
+
+Useful query:
+
+```sql
+select started_at, ended_at, item_type, status, title, source_file
+from broadcast_air_items
+order by started_at desc
+limit 100;
+```
 
 ## Recommended next tables
 
