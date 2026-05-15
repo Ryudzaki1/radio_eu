@@ -12,7 +12,17 @@ const { readAdminConfig, writeAdminConfig } = require("./adminStore");
 const { BroadcastStream } = require("./broadcast");
 const { readAvailableFactLog, resetFactLog, setCursor } = require("./factLog");
 const { readJson, sendFile, sendJson } = require("./http");
-const { acceptQuestion, getListenerStatus, readListenerStore, registerListener, resetListenerStore, setListenerName, updateQuestion } = require("./listenerStore");
+const {
+  acceptQuestion,
+  getListenerStatus,
+  getQuestion,
+  markQuestionPaid,
+  readListenerStore,
+  registerListener,
+  resetListenerStore,
+  setListenerName,
+  updateQuestion,
+} = require("./listenerStore");
 const { getAudioType, listTracks, resolveInside } = require("./music");
 const { readRecentSystemLogs, writeSystemLog } = require("./systemLog");
 
@@ -426,9 +436,42 @@ function createServer(config) {
 
       if (request.method === "POST" && url.pathname === "/api/listeners/question") {
         const result = await acceptQuestion(config, await readJson(request));
-        if (result.ok) enqueueListenerQuestion(config, broadcast, result.question);
+        if (result.ok && !result.requiresPayment) enqueueListenerQuestion(config, broadcast, result.question);
         await emitAdmin(config, "listeners", await readListenerStore(config));
         await sendJson(response, result.ok ? 200 : 403, result);
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/listeners/question/checkout") {
+        const body = await readJson(request);
+        const question = await getQuestion(config, body.questionId);
+        const ok = Boolean(
+          question
+          && question.status === "waiting_payment"
+          && question.telegramId === String(body.telegramId || "")
+          && Number(question.priceStars) === Number(body.amountStars),
+        );
+        await sendJson(response, ok ? 200 : 409, {
+          ok,
+          reason: ok ? null : "invalid_question",
+          question,
+        });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/listeners/question/paid") {
+        const body = await readJson(request);
+        const question = await getQuestion(config, body.questionId);
+        if (!question || question.telegramId !== String(body.telegramId || "")) {
+          await sendJson(response, 409, { ok: false, reason: "invalid_question" });
+          return;
+        }
+        const result = await markQuestionPaid(config, body.questionId, {
+          telegramPaymentChargeId: body.telegramPaymentChargeId,
+        });
+        if (result.ok) enqueueListenerQuestion(config, broadcast, result.question);
+        await emitAdmin(config, "listeners", await readListenerStore(config));
+        await sendJson(response, result.ok ? 200 : 409, result);
         return;
       }
 

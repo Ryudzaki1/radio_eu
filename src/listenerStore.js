@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const MAX_USERS = 9;
-const FREE_QUESTIONS = 5;
+const FREE_QUESTIONS = 1;
 let storeQueue = Promise.resolve();
 
 async function readListenerStore(config) {
@@ -100,17 +100,19 @@ async function acceptQuestion(config, input) {
     if (!isListenerAllowed(config, input, user)) return { ok: false, reason: "forbidden" };
     if (!user.name) return { ok: false, reason: "needs_name", user };
     if (!questionText) return { ok: false, reason: "empty", user };
-    if (!user.unlimited && user.remaining <= 0) return { ok: false, reason: "limit", user };
-
-    if (!user.unlimited) user.remaining -= 1;
+    const requiresPayment = !user.unlimited && user.remaining <= 0;
+    if (!requiresPayment && !user.unlimited) user.remaining -= 1;
     const question = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       telegramId,
       userName: user.name,
       username: user.username,
       question: questionText,
-      status: "queued",
+      status: requiresPayment ? "waiting_payment" : "queued",
       remainingAfter: user.unlimited ? null : user.remaining,
+      priceStars: requiresPayment ? config.listenerQuestionPriceStars : 0,
+      paymentStatus: requiresPayment ? "waiting_payment" : "free",
+      paymentChargeId: null,
       createdAt: new Date().toISOString(),
       text: "",
       audioUrl: null,
@@ -118,7 +120,31 @@ async function acceptQuestion(config, input) {
     };
     store.questions.push(question);
     await writeListenerStore(config, store);
-    return { ok: true, user, question };
+    return { ok: true, user, question, requiresPayment };
+  });
+}
+
+async function getQuestion(config, id) {
+  const store = await readListenerStore(config);
+  return store.questions.find((item) => item.id === String(id)) || null;
+}
+
+async function markQuestionPaid(config, id, payment = {}) {
+  return withStoreLock(async () => {
+    const store = await readListenerStore(config);
+    const question = store.questions.find((item) => item.id === String(id));
+    if (!question) return { ok: false, reason: "not_found" };
+    if (question.status !== "waiting_payment") return { ok: false, reason: "invalid_status", question };
+
+    Object.assign(question, {
+      status: "queued",
+      paymentStatus: "paid",
+      paymentChargeId: payment.telegramPaymentChargeId ? String(payment.telegramPaymentChargeId) : null,
+      paidAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await writeListenerStore(config, store);
+    return { ok: true, question };
   });
 }
 
@@ -158,6 +184,10 @@ function normalizeStore(payload = {}) {
       question: String(question.question || ""),
       status: String(question.status || "queued"),
       remainingAfter: question.remainingAfter === null ? null : Math.max(0, Math.floor(Number(question.remainingAfter) || 0)),
+      priceStars: Math.max(0, Math.floor(Number(question.priceStars) || 0)),
+      paymentStatus: String(question.paymentStatus || (question.status === "waiting_payment" ? "waiting_payment" : "free")),
+      paymentChargeId: question.paymentChargeId ? String(question.paymentChargeId) : null,
+      paidAt: question.paidAt ? String(question.paidAt) : null,
       createdAt: String(question.createdAt || ""),
       updatedAt: question.updatedAt ? String(question.updatedAt) : null,
       text: String(question.text || ""),
@@ -204,7 +234,9 @@ module.exports = {
   FREE_QUESTIONS,
   MAX_USERS,
   acceptQuestion,
+  getQuestion,
   getListenerStatus,
+  markQuestionPaid,
   readListenerStore,
   registerListener,
   resetListenerStore,

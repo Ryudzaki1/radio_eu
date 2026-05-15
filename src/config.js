@@ -20,6 +20,7 @@ const config = {
   listenerStorePath: resolveConfigFile(process.env.LISTENER_STORE_PATH, path.join(rootDir, ".cache", "config", "listeners.json")),
   publicRadioUrl: process.env.PUBLIC_RADIO_URL || `http://localhost:${process.env.PORT || 3000}`,
   listenerApiToken: process.env.LISTENER_API_TOKEN || "",
+  listenerQuestionPriceStars: clampPositiveInteger(process.env.LISTENER_QUESTION_PRICE_STARS, 50),
   listenerAccess: {
     allowedTelegramIds: parseList(process.env.LISTENER_ALLOWED_TELEGRAM_IDS),
     allowedUsernames: parseList(process.env.LISTENER_ALLOWED_USERNAMES).map((item) => item.toLowerCase()),
@@ -101,6 +102,11 @@ function parseList(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function clampPositiveInteger(value, fallback) {
+  const number = Math.floor(Number(value));
+  return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
 module.exports = { config, ensureRuntimeDirs };

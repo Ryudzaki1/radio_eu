@@ -21,6 +21,7 @@ const aiUsageNotifyThresholdPercent = clampNumber(process.env.AI_USAGE_NOTIFY_TH
 const publicUrlHealthIntervalMs = clampNumber(process.env.PUBLIC_URL_HEALTH_INTERVAL_MS, 60_000, 24 * 60 * 60_000, 5 * 60_000);
 const publicServerIp = String(process.env.PUBLIC_SERVER_IP || process.env.RU_PUBLIC_IP || "").trim();
 const listenerStorePath = process.env.LISTENER_STORE_PATH || "/cache/config/listeners.json";
+const questionPriceStars = clampNumber(process.env.LISTENER_QUESTION_PRICE_STARS, 1, 100_000, 50);
 const deepseekConfig = {
   apiKey: process.env.DEEPSEEK_API_KEY || "",
   url: process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions",
@@ -31,9 +32,13 @@ const elevenlabsConfig = {
   baseUrl: process.env.ELEVENLABS_BASE_URL || "https://api.elevenlabs.io",
 };
 const adminPanelLabels = {
-  question: "Вопрос",
+  question: "Задать вопрос",
   radio: "Ссылка на эфир",
   tokens: "Остаток токенов",
+};
+const userPanelLabels = {
+  question: "Задать вопрос",
+  radio: "Ссылка на эфир",
 };
 
 if (!token || !listenerApiToken) {
@@ -43,6 +48,8 @@ if (!token || !listenerApiToken) {
 
 let offset = 0;
 const pendingAdminQuestionChatIds = new Set();
+const pendingUserQuestionChatIds = new Set();
+const pendingUserNameChatIds = new Set();
 const clearedReplyKeyboardChatIds = new Set();
 
 scheduleRadioLinkNotification();
@@ -61,13 +68,14 @@ async function poll() {
       const updates = await telegram("getUpdates", {
         offset,
         timeout: 25,
-        allowed_updates: ["message", "callback_query"],
+        allowed_updates: ["message", "callback_query", "pre_checkout_query"],
       });
 
       for (const update of updates.result || []) {
         offset = update.update_id + 1;
         if (update.message) await handleMessage(update.message);
         if (update.callback_query) await handleCallbackQuery(update.callback_query);
+        if (update.pre_checkout_query) await handlePreCheckoutQuery(update.pre_checkout_query);
       }
     } catch (error) {
       console.error(`poll error: ${error.message}`);
@@ -85,8 +93,15 @@ async function handleMessage(message) {
   const command = text.split(/\s+/)[0].split("@")[0].toLowerCase();
   const isAdmin = isBotAdmin(message.from);
   const adminQuestionIsPending = pendingAdminQuestionChatIds.has(String(chatId));
+  const userQuestionIsPending = pendingUserQuestionChatIds.has(String(chatId));
+  const userNameIsPending = pendingUserNameChatIds.has(String(chatId));
 
   const canAskQuestions = isAdmin || isQuestionUserAllowed(message.from);
+
+  if (message.successful_payment) {
+    await handleSuccessfulPayment(message);
+    return;
+  }
 
   if (command === "/start") {
     const currentPublicUrl = await getPublicRadioUrl();
@@ -102,10 +117,6 @@ async function handleMessage(message) {
     const result = await radio("/api/listeners/start", { telegramId, username, name: profileName });
     if (!result.ok) {
       await sendRegistrationError(chatId, result);
-      return;
-    }
-    if (isOutOfQuestions(result.user)) {
-      await sendLimit(chatId);
       return;
     }
     if (result.needsName) {
@@ -145,6 +156,17 @@ async function handleMessage(message) {
     return;
   }
 
+  if (command === "/menu") {
+    if (isAdmin) {
+      await sendAdminPanel(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
+    } else if (canAskQuestions) {
+      await sendUserMenu(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
+    } else {
+      await sendListenOnly(chatId, await getPublicRadioUrl());
+    }
+    return;
+  }
+
   if (command === "/question") {
     if (!canAskQuestions) {
       await sendListenOnly(chatId, await getPublicRadioUrl());
@@ -153,14 +175,14 @@ async function handleMessage(message) {
     if (isAdmin) {
       await startAdminQuestionMode(chatId);
     } else {
-      await sendQuestionPrompt(chatId);
+      await startUserQuestionMode(chatId, { telegramId, username });
     }
     return;
   }
 
   if (text.startsWith("/")) {
     await send(chatId, canAskQuestions
-      ? "Доступные команды: /radio — открыть эфир, /question — задать вопрос."
+      ? "Доступные команды: /menu — главное меню, /radio — открыть эфир, /question — задать вопрос."
       : "Доступная команда: /radio — открыть эфир.");
     return;
   }
@@ -170,8 +192,24 @@ async function handleMessage(message) {
     return;
   }
 
+  if (!isAdmin && userNameIsPending) {
+    const named = await radio("/api/listeners/name", { telegramId, name: text });
+    if (!named.ok) {
+      await send(chatId, "Не получилось сохранить имя. Нажми /start и попробуй еще раз.");
+      return;
+    }
+    pendingUserNameChatIds.delete(String(chatId));
+    await sendIntro(chatId, named.user.name, await getPublicRadioUrl());
+    return;
+  }
+
   if (isAdmin && !adminQuestionIsPending) {
-    await send(chatId, "Чтобы отправить вопрос в эфир, сначала нажми кнопку «Вопрос».", buildAdminPanelReplyMarkup());
+    await send(chatId, "Чтобы отправить вопрос в эфир, сначала нажми «Задать вопрос» в меню.", buildAdminPanelReplyMarkup());
+    return;
+  }
+
+  if (!isAdmin && !userQuestionIsPending) {
+    await send(chatId, "Сначала выбери действие в главном меню.", buildUserMenuReplyMarkup());
     return;
   }
 
@@ -182,6 +220,10 @@ async function handleMessage(message) {
     });
   }
 
+  if (!isAdmin) {
+    pendingUserQuestionChatIds.delete(String(chatId));
+  }
+
   const status = await radio("/api/listeners/status", { telegramId, username });
   if (!status.ok) {
     if (status.reason === "forbidden") {
@@ -189,11 +231,6 @@ async function handleMessage(message) {
       return;
     }
     await send(chatId, "Нажми /start, чтобы заново подключиться к эфиру.");
-    return;
-  }
-
-  if (isOutOfQuestions(status.user)) {
-    await sendLimit(chatId);
     return;
   }
 
@@ -212,10 +249,6 @@ async function handleMessage(message) {
     question: text,
   });
 
-  if (!accepted.ok && accepted.reason === "limit") {
-    await sendLimit(chatId);
-    return;
-  }
   if (!accepted.ok && accepted.reason === "forbidden") {
     await sendAccessDenied(chatId);
     return;
@@ -229,18 +262,51 @@ async function handleMessage(message) {
     return;
   }
 
+  if (accepted.requiresPayment) {
+    await send(chatId, [
+      "Бесплатный вопрос уже использован.",
+      `Чтобы отправить этот вопрос в эфир, оплати ${accepted.question.priceStars} Stars.`,
+    ].join("\n"));
+    await sendQuestionInvoice(chatId, accepted.question);
+    return;
+  }
+
   await sendRadioLink(chatId, [
     "Вопрос принят в очередь эфира.",
     `Осталось бесплатных вопросов: ${formatRemaining(accepted.user)}.`,
     "Открой эфир и слушай: Sweetie Fox ответит в общей очереди.",
   ].join("\n"), await getPublicRadioUrl());
-  if (isAdmin) await sendAdminPanel(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
+  if (isAdmin) {
+    await sendAdminPanel(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
+  } else {
+    await sendUserMenu(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
+  }
 }
 
 async function handleCallbackQuery(query) {
   const chatId = query.message?.chat?.id || query.from?.id;
   const data = String(query.data || "");
   if (!chatId) return;
+
+  if (data === "user:question") {
+    if (!isQuestionUserAllowed(query.from)) {
+      await answerCallbackQuery(query.id, "Вопросы сейчас недоступны.");
+      await sendListenOnly(chatId, await getPublicRadioUrl());
+      return;
+    }
+    await answerCallbackQuery(query.id, "Напиши вопрос следующим сообщением.");
+    await startUserQuestionMode(chatId, {
+      telegramId: String(query.from.id),
+      username: query.from.username || "",
+    });
+    return;
+  }
+
+  if (data === "user:radio") {
+    await answerCallbackQuery(query.id, "Отправляю ссылку.");
+    await sendRadioLinkMessage(chatId);
+    return;
+  }
 
   if (!isBotAdmin(query.from)) {
     await answerCallbackQuery(query.id, "Эта панель доступна только админу.");
@@ -269,14 +335,62 @@ async function handleCallbackQuery(query) {
   await answerCallbackQuery(query.id);
 }
 
+async function handlePreCheckoutQuery(query) {
+  const payload = parseQuestionInvoicePayload(query.invoice_payload);
+  if (!payload) {
+    await answerPreCheckoutQuery(query.id, false, "Не удалось проверить заказ.");
+    return;
+  }
+
+  const result = await radio("/api/listeners/question/checkout", {
+    questionId: payload.questionId,
+    telegramId: String(query.from.id),
+    amountStars: query.total_amount,
+  });
+  if (!result.ok || query.currency !== "XTR") {
+    await answerPreCheckoutQuery(query.id, false, "Этот заказ уже недоступен.");
+    return;
+  }
+
+  await answerPreCheckoutQuery(query.id, true);
+}
+
+async function handleSuccessfulPayment(message) {
+  const chatId = message.chat.id;
+  const payment = message.successful_payment;
+  const payload = parseQuestionInvoicePayload(payment.invoice_payload);
+  if (!payload || payment.currency !== "XTR") {
+    await send(chatId, "Оплата получена, но заказ не удалось сопоставить автоматически. Напиши администратору.");
+    return;
+  }
+
+  const result = await radio("/api/listeners/question/paid", {
+    questionId: payload.questionId,
+    telegramId: String(message.from.id),
+    telegramPaymentChargeId: payment.telegram_payment_charge_id,
+  });
+  if (!result.ok) {
+    await send(chatId, "Оплата получена, но вопрос уже не удалось поставить в очередь автоматически. Напиши администратору.");
+    return;
+  }
+
+  await sendRadioLink(chatId, [
+    "Оплата получена.",
+    "Вопрос поставлен в очередь эфира.",
+    "Открой эфир и слушай: Sweetie Fox ответит в общей очереди.",
+  ].join("\n"), await getPublicRadioUrl());
+  await sendUserMenu(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
+}
+
 async function sendStartIntro(chatId, publicUrl) {
+  pendingUserNameChatIds.add(String(chatId));
   await sendRadioLink(chatId, [
     "Привет. Я сохраню тебя как слушателя AI Chill Radio.",
     "",
     `<a href="${escapeHtml(publicUrl)}">Открыть эфир Sweetie Fox</a>`,
     "",
     "Открой эфир, нажми Play, а потом напиши здесь свое имя.",
-    "После этого каждое новое сообщение в этом чате будет вопросом для диктора.",
+    "После этого появится главное меню с действиями.",
     "",
     "Как тебя зовут?",
   ].join("\n"), publicUrl);
@@ -288,9 +402,9 @@ async function sendIntro(chatId, name, publicUrl) {
     "",
     `<a href="${escapeHtml(publicUrl)}">Открыть эфир Sweetie Fox</a>`,
     "",
-    "Теперь каждое новое сообщение в этом чате будет вопросом для Sweetie Fox в эфире.",
+    "Первый вопрос диктору бесплатный. Следующие вопросы стоят 50 Stars.",
   ].join("\n"), publicUrl);
-  await sendQuestionPrompt(chatId);
+  await sendUserMenu(chatId, publicUrl, { includeRadioLink: false });
 }
 
 async function sendListenOnlyIntro(chatId, publicUrl) {
@@ -313,7 +427,7 @@ async function sendListenOnly(chatId, publicUrl) {
 }
 
 async function sendQuestionPrompt(chatId) {
-  await send(chatId, "Напиши вопрос одним сообщением. Я передам его Sweetie Fox в очередь эфира.");
+  await send(chatId, "Напиши вопрос одним сообщением. Если бесплатный вопрос уже использован, после текста я пришлю оплату на 50 Stars.");
 }
 
 async function startAdminQuestionMode(chatId) {
@@ -324,6 +438,16 @@ async function startAdminQuestionMode(chatId) {
   });
 }
 
+async function startUserQuestionMode(chatId, identity = {}) {
+  await radio("/api/listeners/start", {
+    telegramId: identity.telegramId,
+    username: identity.username,
+    name: identity.name || "",
+  }).catch(() => {});
+  pendingUserQuestionChatIds.add(String(chatId));
+  await sendQuestionPrompt(chatId);
+}
+
 async function sendAdminPanel(chatId, publicUrl, options = {}) {
   if (!clearedReplyKeyboardChatIds.has(String(chatId))) {
     clearedReplyKeyboardChatIds.add(String(chatId));
@@ -331,8 +455,21 @@ async function sendAdminPanel(chatId, publicUrl, options = {}) {
   }
   await send(chatId, [
     "Админ-панель Sweetie Fox.",
-    "Выбери действие кнопкой ниже или используй команды: /question, /radio, /tokens.",
+    "Главное меню администратора. Вернуться сюда можно командой /menu.",
   ].join("\n"), buildAdminPanelReplyMarkup());
+  if (options.includeRadioLink === false) return;
+  await sendRadioLink(chatId, [
+    "Актуальная ссылка на эфир:",
+    "",
+    `<a href="${escapeHtml(publicUrl)}">${escapeHtml(publicUrl)}</a>`,
+  ].join("\n"), publicUrl);
+}
+
+async function sendUserMenu(chatId, publicUrl, options = {}) {
+  await send(chatId, [
+    "Главное меню.",
+    "Первый вопрос бесплатный. Следующие вопросы стоят 50 Stars.",
+  ].join("\n"), buildUserMenuReplyMarkup());
   if (options.includeRadioLink === false) return;
   await sendRadioLink(chatId, [
     "Актуальная ссылка на эфир:",
@@ -366,10 +503,6 @@ async function sendRegistrationError(chatId, result) {
     return;
   }
   await send(chatId, "Сейчас регистрация недоступна. Попробуй позже.");
-}
-
-async function sendLimit(chatId) {
-  await send(chatId, "Бесплатные вопросы закончились. Лимит строгий: новых бесплатных вопросов нет.");
 }
 
 async function sendAccessDenied(chatId) {
@@ -417,6 +550,14 @@ async function answerCallbackQuery(callbackQueryId, text = "") {
   });
 }
 
+async function answerPreCheckoutQuery(preCheckoutQueryId, ok, errorMessage = undefined) {
+  await telegram("answerPreCheckoutQuery", {
+    pre_checkout_query_id: preCheckoutQueryId,
+    ok,
+    error_message: ok ? undefined : errorMessage,
+  });
+}
+
 async function send(chatId, text, replyMarkup = undefined) {
   await telegram("sendMessage", {
     chat_id: chatId,
@@ -436,11 +577,26 @@ async function sendRadioLink(chatId, text, url) {
   });
 }
 
+async function sendQuestionInvoice(chatId, question) {
+  await telegram("sendInvoice", {
+    chat_id: chatId,
+    title: "Вопрос диктору",
+    description: "Sweetie Fox ответит на твой вопрос в эфире радио.",
+    payload: buildQuestionInvoicePayload(question.id),
+    provider_token: "",
+    currency: "XTR",
+    prices: [{ label: "Вопрос диктору", amount: Number(question.priceStars || questionPriceStars) }],
+    start_parameter: `question_${String(question.id).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48)}`,
+  });
+}
+
 async function setupBotInterface() {
   await telegram("setMyCommands", {
     commands: [
       { command: "start", description: "Запуск и регистрация" },
+      { command: "menu", description: "Главное меню" },
       { command: "radio", description: "Открыть эфир" },
+      { command: "question", description: "Задать вопрос диктору" },
     ],
   });
   for (const chatId of adminTelegramIds) {
@@ -448,22 +604,20 @@ async function setupBotInterface() {
       scope: { type: "chat", chat_id: chatId },
       commands: [
         { command: "start", description: "Открыть админ-панель" },
+        { command: "menu", description: "Главное меню администратора" },
         { command: "question", description: "Задать вопрос Sweetie Fox" },
         { command: "radio", description: "Получить ссылку на эфир" },
         { command: "tokens", description: "Остаток генерации текста и аудио" },
       ],
     });
   }
-  await setupBotMenu(await getPublicRadioUrl());
+  await setupBotMenu();
 }
 
-async function setupBotMenu(url) {
-  if (!isWebAppUrl(url)) return;
+async function setupBotMenu() {
   await telegram("setChatMenuButton", {
     menu_button: {
-      type: "web_app",
-      text: "Слушать эфир",
-      web_app: { url },
+      type: "commands",
     },
   });
 }
@@ -487,6 +641,15 @@ function buildAdminPanelReplyMarkup() {
         { text: adminPanelLabels.radio, callback_data: "admin:radio" },
       ],
       [{ text: adminPanelLabels.tokens, callback_data: "admin:tokens" }],
+    ],
+  };
+}
+
+function buildUserMenuReplyMarkup() {
+  return {
+    inline_keyboard: [
+      [{ text: userPanelLabels.question, callback_data: "user:question" }],
+      [{ text: userPanelLabels.radio, callback_data: "user:radio" }],
     ],
   };
 }
@@ -538,6 +701,17 @@ function formatRemaining(user = {}) {
   return user.unlimited ? "безлимит" : String(Math.max(0, Number(user.remaining) || 0));
 }
 
+function buildQuestionInvoicePayload(questionId) {
+  return `question:${questionId}`;
+}
+
+function parseQuestionInvoicePayload(payload) {
+  const value = String(payload || "");
+  if (!value.startsWith("question:")) return null;
+  const questionId = value.slice("question:".length);
+  return questionId ? { questionId } : null;
+}
+
 async function getPublicRadioUrl() {
   if (isValidPublicUrl(publicRadioUrl)) return publicRadioUrl;
   try {
@@ -581,7 +755,7 @@ async function notifyRadioLinkChange() {
     history = Array.isArray(state.history) ? state.history : [];
   } catch {}
 
-  await setupBotMenu(currentPublicUrl).catch((error) => {
+  await setupBotMenu().catch((error) => {
     console.error(`bot menu update error: ${error.message}`);
   });
 
