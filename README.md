@@ -40,8 +40,8 @@ sudo docker compose up -d --build
 На RU должны быть контейнеры:
 
 ```text
-ai-chill-radio
-ai-chill-radio-postgres
+radio-ru
+radio-ru-postgres
 ```
 
 Telegram-бот на RU не запускается. Это важно: обычный `docker compose up -d`
@@ -57,7 +57,7 @@ Telegram-бот на RU не запускается. Это важно: обыч
 
 Что делает EU:
 
-- держит Telegram-бота `ai-chill-radio-bot-eu`;
+- держит Telegram-бота `radio-eu`;
 - ходит в Telegram Bot API;
 - ходит в ElevenLabs API;
 - общается с RU по внутреннему WireGuard-адресу;
@@ -73,7 +73,7 @@ docker compose -f docker-compose.eu-bot.yml up -d --build
 На EU должен быть контейнер:
 
 ```text
-ai-chill-radio-bot-eu
+radio-eu
 ```
 
 ## Публичные Ссылки
@@ -253,8 +253,8 @@ RU:
 ```bash
 cd /opt/radio_ru
 sudo docker ps
-sudo docker logs --tail 80 ai-chill-radio
-sudo docker exec ai-chill-radio-postgres psql -U radio -d radio -c \
+sudo docker logs --tail 80 radio-ru
+sudo docker exec radio-ru-postgres psql -U radio -d radio -c \
   "select started_at, ended_at, item_type, status, title from broadcast_air_items order by started_at desc limit 20;"
 ```
 
@@ -263,14 +263,14 @@ EU:
 ```bash
 cd /opt/radio_europa
 docker ps
-docker logs --tail 80 ai-chill-radio-bot-eu
+docker logs --tail 80 radio-eu
 ```
 
 Проверка API внутри RU-контейнера:
 
 ```bash
-sudo docker exec ai-chill-radio wget -q -O - http://127.0.0.1:3000/api/radio/state
-sudo docker exec ai-chill-radio wget -q -O - http://127.0.0.1:3000/api/tracks
+sudo docker exec radio-ru wget -q -O - http://127.0.0.1:3000/api/radio/state
+sudo docker exec radio-ru wget -q -O - http://127.0.0.1:3000/api/tracks
 ```
 
 `/api/health/ai` защищен админской авторизацией и без cookie вернет `401`.
@@ -325,10 +325,10 @@ npm install
 npm start
 ```
 
-Или через Docker:
+Или локально через Docker с обеими ролями:
 
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.local.yml up -d --build
 ```
 
 Локальные адреса:
@@ -338,14 +338,29 @@ http://localhost:3000/
 http://localhost:3000/simsim
 ```
 
-## Быстрый Аудит На 14.05.2026
+## Локальный Docker
+
+Локальная разработка поднимает две прикладные роли:
+
+```text
+radio-local-ru
+radio-local-eu
+```
+
+Отдельный контейнер `radio-local-ru-postgres` является БД внутри RU-роли.
+
+Локальный `radio-local-eu` по умолчанию стартует в безопасном idle-режиме,
+чтобы не конкурировать с боевым Telegram-ботом за `getUpdates`. Для отдельного
+тестового бота можно передать `LOCAL_TELEGRAM_BOT_TOKEN`.
+
+## Быстрый Аудит На 15.05.2026
 
 Проверено:
 
 - локальный git чистый перед изменением README;
 - ветка `main` синхронизирована с `radio_ru/main` и `radio_eu/main`;
-- RU-контейнеры `ai-chill-radio` и `ai-chill-radio-postgres` работают;
-- EU-контейнер `ai-chill-radio-bot-eu` работает;
+- RU-контейнеры `radio-ru` и `radio-ru-postgres` работают;
+- EU-контейнер `radio-eu` работает;
 - `node --check` проходит для серверных файлов, админки, клиента и бота;
 - `/api/radio/state` отвечает, эфир идет;
 - `/api/tracks` отвечает, музыка видна;
@@ -368,12 +383,11 @@ radio_ru
 radio_eu
 ```
 
-Старый `ai_chill_radio` сейчас не используется как основной рабочий контур.
 
 ## Что Не Трогать Без Причины
 
 - Не запускать Telegram-бота на RU.
 - Не коммитить `.env`, ключи, токены и пароли.
-- Не удалять `radio-cache` и `radio-postgres` без явной причины.
+- Не удалять `radio-cache` и `radio-postgres` на RU без явной причины.
 - Не чистить архив аудио без понимания, что это приведет к повторной трате
   токенов на генерацию.

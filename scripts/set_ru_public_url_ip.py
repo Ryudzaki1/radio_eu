@@ -27,7 +27,7 @@ else
   printf '\\nPUBLIC_RADIO_URL={PUBLIC_URL}\\n' >> .env
 fi
 docker compose up -d
-docker compose restart radio telegram-bot
+docker compose restart ru
 sleep 5
 grep -E '^(PUBLIC_RADIO_URL|ELEVENLABS_BASE_URL|PORT)=' .env
 docker ps --format 'table {{{{.Names}}}}\\t{{{{.Status}}}}\\t{{{{.Ports}}}}'

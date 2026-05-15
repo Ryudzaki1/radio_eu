@@ -92,11 +92,10 @@ http://10.77.0.2:18082 {{
         "sudo -n caddy validate --config /etc/caddy/Caddyfile",
         "sudo -n systemctl restart caddy",
         "sudo -n systemctl is-active caddy",
-        "sudo -n docker rm -f ai-chill-radio-bot 2>/dev/null || true",
         "cd /opt/radio_ru",
-        "sudo -n docker compose up -d --build radio",
+        "sudo -n docker compose up -d --build ru",
         "for i in $(seq 1 40); do",
-        "  status=$(sudo -n docker inspect -f '{{.State.Health.Status}}' ai-chill-radio 2>/dev/null || true)",
+        "  status=$(sudo -n docker inspect -f '{{.State.Health.Status}}' radio-ru 2>/dev/null || true)",
         "  [ \"$status\" = healthy ] && break",
         "  sleep 2",
         "done",
@@ -190,10 +189,9 @@ def configure_eu(client, values):
         "print('eu_telegram_getme_ok=' + str(data.get('ok')))",
         "print('eu_telegram_bot_username=' + str((data.get('result') or {}).get('username', '')))",
         "PY",
-        "docker rm -f ai-chill-radio-bot ai-chill-radio 2>/dev/null || true",
         "docker compose -f docker-compose.eu-bot.yml up -d --build --force-recreate",
-        "docker exec ai-chill-radio-bot-eu sh -lc 'rm -f /cache/config/bot-link.json' || true",
-        "docker restart ai-chill-radio-bot-eu >/dev/null",
+        "docker exec radio-eu sh -lc 'rm -f /cache/config/bot-link.json' || true",
+        "docker restart radio-eu >/dev/null",
     ]), timeout=1800)
 
     time.sleep(12)
@@ -203,9 +201,9 @@ def configure_eu(client, values):
         "echo '--- containers'",
         "docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'",
         "echo '--- bot link state'",
-        "docker exec ai-chill-radio-bot-eu sh -lc 'cat /cache/config/bot-link.json 2>/dev/null || true'",
+        "docker exec radio-eu sh -lc 'cat /cache/config/bot-link.json 2>/dev/null || true'",
         "echo '--- recent bot errors'",
-        "docker logs --since 20s ai-chill-radio-bot-eu 2>&1 | grep -Ei 'error|failed|timeout|conflict' || true",
+        "docker logs --since 20s radio-eu 2>&1 | grep -Ei 'error|failed|timeout|conflict' || true",
     ]), timeout=240)
 
 

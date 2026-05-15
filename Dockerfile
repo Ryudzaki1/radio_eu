@@ -19,7 +19,6 @@ COPY bot ./bot
 
 USER root
 RUN apk add --no-cache ffmpeg
-RUN chmod +x /app/bot/quick-tunnel-watch.sh
 
 RUN mkdir -p /music /cache/announcements /cache/archive /cache/config \
   && chown -R node:node /app /music /cache

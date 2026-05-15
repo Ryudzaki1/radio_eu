@@ -1,7 +1,7 @@
 services:
-  telegram-bot-eu:
+  eu:
     build: ..
-    container_name: ai-chill-radio-bot-eu
+    container_name: radio-eu
     restart: unless-stopped
     env_file:
       - ../.env

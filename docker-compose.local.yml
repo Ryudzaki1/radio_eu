@@ -1,7 +1,7 @@
 services:
   ru-postgres:
     image: postgres:16-alpine
-    container_name: radio-ru-postgres
+    container_name: radio-local-ru-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-radio}
@@ -13,23 +13,24 @@ services:
       timeout: 5s
       retries: 5
     volumes:
-      - radio-postgres:/var/lib/postgresql/data
+      - local-ru-postgres:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "${POSTGRES_HOST_PORT:-127.0.0.1:5432}:5432"
 
   ru:
     build: .
-    container_name: radio-ru
+    container_name: radio-local-ru
     restart: unless-stopped
+    depends_on:
+      ru-postgres:
+        condition: service_healthy
     ports:
       - "${HOST_PORT:-127.0.0.1:3000}:3000"
     env_file:
       - .env
     environment:
       PORT: 3000
-      POSTGRES_HOST: ${POSTGRES_HOST:-ru-postgres}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: ru-postgres
+      POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-radio}
       POSTGRES_USER: ${POSTGRES_USER:-radio}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-postgres-password}
@@ -44,7 +45,6 @@ services:
       TOPIC_CYCLE_STATE_PATH: /cache/config/topic-cycle.json
       LISTENER_STORE_PATH: /cache/config/listeners.json
       PUBLIC_RADIO_URL: ${PUBLIC_RADIO_URL:-http://localhost:3000}
-      PUBLIC_SERVER_IP: ${PUBLIC_SERVER_IP:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       LISTENER_API_TOKEN: ${LISTENER_API_TOKEN}
@@ -56,8 +56,49 @@ services:
       LISTENER_ADMIN_USERNAMES: ${LISTENER_ADMIN_USERNAMES:-}
     volumes:
       - ./music:/music
-      - radio-cache:/cache
+      - local-ru-cache:/cache
+
+  eu:
+    build: .
+    container_name: radio-local-eu
+    restart: unless-stopped
+    depends_on:
+      ru:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      RADIO_INTERNAL_URL: http://ru:3000
+      PUBLIC_RADIO_URL: ${PUBLIC_RADIO_URL:-http://localhost:3000}
+      PUBLIC_SERVER_IP: ${PUBLIC_SERVER_IP:-}
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
+      TELEGRAM_BOT_TOKEN: ${LOCAL_TELEGRAM_BOT_TOKEN:-}
+      LISTENER_API_TOKEN: ${LISTENER_API_TOKEN}
+      BOT_ALLOWED_TELEGRAM_IDS: ${BOT_ALLOWED_TELEGRAM_IDS:-}
+      BOT_ALLOWED_USERNAMES: ${BOT_ALLOWED_USERNAMES:-}
+      BOT_ADMIN_TELEGRAM_IDS: ${BOT_ADMIN_TELEGRAM_IDS:-}
+      BOT_ADMIN_USERNAMES: ${BOT_ADMIN_USERNAMES:-}
+      BOT_NOTIFY_CHAT_IDS: ${BOT_NOTIFY_CHAT_IDS:-}
+      BOT_LINK_STATE_PATH: /cache/config/bot-link.json
+      PUBLIC_URL_STATE_PATH: /cache/config/public-url.json
+      PUBLIC_URL_HEALTH_STATE_PATH: /cache/config/public-url-health.json
+      PUBLIC_URL_HEALTH_INTERVAL_MS: ${PUBLIC_URL_HEALTH_INTERVAL_MS:-300000}
+      LISTENER_STORE_PATH: /cache/config/listeners.json
+    volumes:
+      - local-eu-cache:/cache
+    command:
+      - sh
+      - -lc
+      - |
+        if [ -n "$$TELEGRAM_BOT_TOKEN" ]; then
+          exec node bot/bot.js
+        fi
+        echo "LOCAL_TELEGRAM_BOT_TOKEN is empty; EU role is idle."
+        exec tail -f /dev/null
+    healthcheck:
+      disable: true
 
 volumes:
-  radio-cache:
-  radio-postgres:
+  local-ru-cache:
+  local-ru-postgres:
+  local-eu-cache:

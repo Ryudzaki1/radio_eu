@@ -27,7 +27,7 @@ Responsibilities:
 - WireGuard peer at `10.77.0.1`;
 - private Caddy proxy to ElevenLabs at `http://10.77.0.1:18080`;
 - private Caddy proxy to Telegram Bot API at `http://10.77.0.1:18081`;
-- Telegram bot container `ai-chill-radio-bot-eu`.
+- Telegram bot container `radio-eu`.
 
 The Europe bot talks to the Russia radio API through:
 
@@ -41,9 +41,3 @@ Run it with:
 ```bash
 docker compose -f docker-compose.eu-bot.yml up -d --build
 ```
-
-## Legacy scripts
-
-Old VPN/Xray/OpenVPN/VLESS/VMess/Shadowsocks helpers live in
-`scripts/legacy_vpn/`. They are archived for history only and are not part of
-the current production path.

@@ -44,7 +44,6 @@ Layout:
 Caddyfile          private ElevenLabs proxy config
 docker-compose.bot.yml EU-only Telegram bot compose shape for the split folder
 wg0.example.conf   WireGuard shape without private keys
-scripts/           helper scripts for tunnel/proxy/server checks
 ```
 
 Private WireGuard keys stay only on the servers.

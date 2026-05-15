@@ -83,8 +83,8 @@ try:
         "print('listener_reason=' + str(data.get('reason', '')))",
         "PY",
     ]))
-    run(eu, "EU bot recent errors", "docker logs --since 60s ai-chill-radio-bot-eu 2>&1 | grep -Ei 'error|failed|timeout|conflict' || true")
-    run(eu, "EU bot link state", "docker exec ai-chill-radio-bot-eu sh -lc 'cat /cache/config/bot-link.json 2>/dev/null || true'")
+    run(eu, "EU bot recent errors", "docker logs --since 60s radio-eu 2>&1 | grep -Ei 'error|failed|timeout|conflict' || true")
+    run(eu, "EU bot link state", "docker exec radio-eu sh -lc 'cat /cache/config/bot-link.json 2>/dev/null || true'")
 finally:
     ru.close()
     eu.close()

@@ -21,8 +21,7 @@ def load_key(path):
 script = f"""
 set -euo pipefail
 cd /opt/radio_ru
-docker rm -f ai-chill-radio ai-chill-radio-bot ai-chill-radio-tunnel ai-chill-radio-quick-tunnel 2>/dev/null || true
-docker compose up -d --build
+docker compose up -d --build ru ru-postgres
 
 cat > /etc/caddy/Caddyfile <<'EOF'
 :80 {{

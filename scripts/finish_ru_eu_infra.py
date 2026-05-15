@@ -81,8 +81,6 @@ apt-get install -y wireguard caddy ca-certificates curl
 
 systemctl stop xray || true
 systemctl disable xray || true
-docker rm -f ai-chill-radio ai-chill-radio-bot ai-chill-radio-tunnel ai-chill-radio-quick-tunnel 2>/dev/null || true
-
 EU_PRIVATE="$(cat /etc/wireguard/eu_private.key)"
 cat > /etc/wireguard/wg0.conf <<EOF
 [Interface]
@@ -155,8 +153,7 @@ systemctl restart wg-quick@wg0
 
 cd /opt/radio_ru
 git pull --ff-only origin main
-docker rm -f ai-chill-radio ai-chill-radio-bot ai-chill-radio-tunnel ai-chill-radio-quick-tunnel 2>/dev/null || true
-docker compose up -d --build
+docker compose up -d --build ru ru-postgres
 
 cat > /etc/caddy/Caddyfile <<'EOF'
 :80 {{

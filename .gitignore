@@ -9,16 +9,6 @@ music/live/*
 music/play/*
 !music/play/.gitkeep
 
-# Local split workspace copies.
-russia/app/.env
-russia/app/music/*
-!russia/app/music/.gitkeep
-!russia/app/music/live/
-russia/app/music/live/*
-!russia/app/music/live/.gitkeep
-!russia/app/music/play/
-russia/app/music/play/*
-!russia/app/music/play/.gitkeep
 europe/*.key
 europe/*.env
 .codex_deps/
