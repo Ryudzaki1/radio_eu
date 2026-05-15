@@ -60,6 +60,14 @@ For now, these optional IDs are usually empty because the current broadcast
 runtime still uses in-memory queues and JSON files. They are reserved for the
 paid-question and durable-queue migration.
 
+Paid Telegram questions are now written into the readable database as well as
+the runtime JSON store:
+
+- `listener_questions.external_question_id` stores the runtime question id;
+- `payment_orders.provider_payload` stores the invoice payload
+  `question:<external_question_id>`;
+- `payments.provider_charge_id` stores Telegram's successful payment charge id.
+
 Useful query:
 
 ```sql

@@ -25,6 +25,7 @@ const {
 } = require("./listenerStore");
 const { getAudioType, listTracks, resolveInside } = require("./music");
 const { readRecentSystemLogs, writeSystemLog } = require("./systemLog");
+const { getPaymentSummary, runPaymentDbSelfTest } = require("./database");
 
 const publicFiles = new Set(["/", "/index.html", "/styles.css", "/script.js", "/admin-login.html", "/admin.html", "/admin.js"]);
 const staticTypes = new Map([
@@ -413,6 +414,12 @@ function createServer(config) {
         return;
       }
 
+      if (request.method === "POST" && url.pathname === "/api/admin/tests/payment-flow") {
+        const result = await runPaymentFlowSelfTest(config);
+        await sendJson(response, result.ok ? 200 : 500, result);
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/api/listeners/start") {
         const result = await registerListener(config, await readJson(request));
         await emitAdmin(config, "listeners", await readListenerStore(config));
@@ -468,6 +475,7 @@ function createServer(config) {
         }
         const result = await markQuestionPaid(config, body.questionId, {
           telegramPaymentChargeId: body.telegramPaymentChargeId,
+          rawPayload: body.rawPayload,
         });
         if (result.ok) enqueueListenerQuestion(config, broadcast, result.question);
         await emitAdmin(config, "listeners", await readListenerStore(config));
@@ -557,6 +565,78 @@ function enqueueListenerQuestion(config, broadcast, question) {
     () => processListenerQuestion(config, broadcast, question, queueVersion),
     () => processListenerQuestion(config, broadcast, question, queueVersion),
   );
+}
+
+async function runPaymentFlowSelfTest(config) {
+  const tempListenerStorePath = path.join(
+    path.dirname(config.listenerStorePath),
+    `payment-flow-selftest-${Date.now()}.json`,
+  );
+  const tempConfig = {
+    ...config,
+    listenerStorePath: tempListenerStorePath,
+    database: { ...config.database, enabled: false },
+    listenerAccess: {
+      allowedTelegramIds: [],
+      allowedUsernames: [],
+      unlimitedTelegramIds: [],
+      unlimitedUsernames: [],
+      adminTelegramIds: [],
+      adminUsernames: [],
+    },
+  };
+  try {
+    await resetListenerStore(tempConfig);
+    await registerListener(tempConfig, {
+      telegramId: "900000001",
+      username: "payment_test_user",
+      name: "Тестовый слушатель",
+    });
+    const free = await acceptQuestion(tempConfig, {
+      telegramId: "900000001",
+      username: "payment_test_user",
+      question: "Первый бесплатный вопрос",
+    });
+    const paidDraft = await acceptQuestion(tempConfig, {
+      telegramId: "900000001",
+      username: "payment_test_user",
+      question: "Второй платный вопрос",
+    });
+    const paid = await markQuestionPaid(tempConfig, paidDraft.question.id, {
+      telegramPaymentChargeId: "selftest-charge",
+    });
+    const db = await runPaymentDbSelfTest(config);
+    const summary = await getPaymentSummary(config);
+
+    return {
+      ok: Boolean(
+        free.ok
+        && free.question.status === "queued"
+        && paidDraft.ok
+        && paidDraft.requiresPayment
+        && paidDraft.question.status === "waiting_payment"
+        && Number(paidDraft.question.priceStars) === config.listenerQuestionPriceStars
+        && paid.ok
+        && paid.question.status === "queued"
+        && db.ok,
+      ),
+      freeQuestion: {
+        status: free.question.status,
+        remainingAfter: free.question.remainingAfter,
+      },
+      paidQuestion: {
+        draftStatus: paidDraft.question.status,
+        priceStars: paidDraft.question.priceStars,
+        finalStatus: paid.question.status,
+      },
+      database: db,
+      databaseSummary: summary,
+    };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  } finally {
+    await fs.promises.rm(tempListenerStorePath, { force: true }).catch(() => {});
+  }
 }
 
 function createTopicCycleController(config, broadcast) {

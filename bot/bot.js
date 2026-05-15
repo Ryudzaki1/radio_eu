@@ -35,6 +35,7 @@ const adminPanelLabels = {
   question: "Задать вопрос",
   radio: "Ссылка на эфир",
   tokens: "Остаток токенов",
+  stars: "Баланс Stars",
 };
 const userPanelLabels = {
   question: "Задать вопрос",
@@ -142,12 +143,26 @@ async function handleMessage(message) {
     return;
   }
 
+  if (isAdmin && isAdminPanelText(text, adminPanelLabels.stars)) {
+    await sendStarBalanceReport(chatId);
+    return;
+  }
+
   if (command === "/tokens") {
     if (!isAdmin) {
       await sendAccessDenied(chatId);
       return;
     }
     await sendAiUsageReport(chatId);
+    return;
+  }
+
+  if (command === "/stars") {
+    if (!isAdmin) {
+      await sendAccessDenied(chatId);
+      return;
+    }
+    await sendStarBalanceReport(chatId);
     return;
   }
 
@@ -332,6 +347,12 @@ async function handleCallbackQuery(query) {
     return;
   }
 
+  if (data === "admin:stars") {
+    await answerCallbackQuery(query.id, "Проверяю Stars.");
+    await sendStarBalanceReport(chatId);
+    return;
+  }
+
   await answerCallbackQuery(query.id);
 }
 
@@ -368,6 +389,7 @@ async function handleSuccessfulPayment(message) {
     questionId: payload.questionId,
     telegramId: String(message.from.id),
     telegramPaymentChargeId: payment.telegram_payment_charge_id,
+    rawPayload: payment,
   });
   if (!result.ok) {
     await send(chatId, "Оплата получена, но вопрос уже не удалось поставить в очередь автоматически. Напиши администратору.");
@@ -379,6 +401,7 @@ async function handleSuccessfulPayment(message) {
     "Вопрос поставлен в очередь эфира.",
     "Открой эфир и слушай: Sweetie Fox ответит в общей очереди.",
   ].join("\n"), await getPublicRadioUrl());
+  await notifyAdminsAboutPaidQuestion(message, result.question);
   await sendUserMenu(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
 }
 
@@ -491,6 +514,29 @@ async function sendAiUsageReport(chatId) {
   await send(chatId, "Проверяю остатки генерации текста и аудио...");
   const usage = await getAiUsage();
   await send(chatId, formatAiUsageReport(usage), buildAdminPanelReplyMarkup());
+}
+
+async function sendStarBalanceReport(chatId) {
+  try {
+    const payload = await telegram("getMyStarBalance", {});
+    const amount = payload.result?.amount ?? 0;
+    await send(chatId, `Баланс бота: ${amount} Stars.`, buildAdminPanelReplyMarkup());
+  } catch (error) {
+    await send(chatId, `Не удалось получить баланс Stars: ${error.message}`, buildAdminPanelReplyMarkup());
+  }
+}
+
+async function notifyAdminsAboutPaidQuestion(message, question) {
+  const recipients = await getAdminNotificationChatIds();
+  const payer = getProfileName(message.from);
+  for (const chatId of recipients) {
+    await send(chatId, [
+      "Оплачен вопрос диктору.",
+      `Пользователь: ${payer}`,
+      `Сумма: ${question.priceStars || questionPriceStars} Stars`,
+      `Вопрос: ${question.question}`,
+    ].join("\n"), buildAdminPanelReplyMarkup()).catch(() => {});
+  }
 }
 
 async function sendRegistrationError(chatId, result) {
@@ -608,6 +654,7 @@ async function setupBotInterface() {
         { command: "question", description: "Задать вопрос Sweetie Fox" },
         { command: "radio", description: "Получить ссылку на эфир" },
         { command: "tokens", description: "Остаток генерации текста и аудио" },
+        { command: "stars", description: "Баланс Stars бота" },
       ],
     });
   }
@@ -640,7 +687,10 @@ function buildAdminPanelReplyMarkup() {
         { text: adminPanelLabels.question, callback_data: "admin:question" },
         { text: adminPanelLabels.radio, callback_data: "admin:radio" },
       ],
-      [{ text: adminPanelLabels.tokens, callback_data: "admin:tokens" }],
+      [
+        { text: adminPanelLabels.tokens, callback_data: "admin:tokens" },
+        { text: adminPanelLabels.stars, callback_data: "admin:stars" },
+      ],
     ],
   };
 }

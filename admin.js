@@ -14,6 +14,7 @@ const voiceHostSelect = document.querySelector("#voiceHostSelect");
 const refreshPromptsButton = document.querySelector("#refreshPromptsButton");
 const testGreetingButton = document.querySelector("#testGreetingButton");
 const testFactButton = document.querySelector("#testFactButton");
+const testPaymentFlowButton = document.querySelector("#testPaymentFlowButton");
 const adminAudio = document.querySelector("#adminAudio");
 const testOutput = document.querySelector("#testOutput");
 const topicList = document.querySelector("#topicList");
@@ -117,6 +118,7 @@ startTopicCycleButton?.addEventListener("click", startTopicCycle);
 stopTopicCycleButton?.addEventListener("click", stopTopicCycle);
 testGreetingButton?.addEventListener("click", () => enqueueAdminVoiceTest("/api/greeting"));
 testFactButton?.addEventListener("click", () => enqueueAdminVoiceTest("/api/fact"));
+testPaymentFlowButton?.addEventListener("click", testPaymentFlow);
 addTopicButton?.addEventListener("click", addTopic);
 addSubtopicButton?.addEventListener("click", addSubtopic);
 deleteTopicButton?.addEventListener("click", deleteSelectedTopic);
@@ -1000,6 +1002,27 @@ function enqueueAdminVoiceTest(url) {
     });
 }
 
+async function testPaymentFlow() {
+  if (!testPaymentFlowButton || !testOutput) return;
+  testPaymentFlowButton.disabled = true;
+  testOutput.textContent = "Проверяю внутреннюю цепочку оплаты вопроса...";
+  try {
+    const response = await fetch("/api/admin/tests/payment-flow", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) throw new Error(payload.error || payload.database?.reason || "Тест не прошел");
+    testOutput.textContent = [
+      `Бесплатный вопрос: ${payload.freeQuestion.status}`,
+      `Платный черновик: ${payload.paidQuestion.draftStatus} за ${payload.paidQuestion.priceStars} Stars`,
+      `После оплаты: ${payload.paidQuestion.finalStatus}`,
+      `БД: order=${payload.database.orderStatus}, payment=${payload.database.paymentRecorded ? "ok" : "missing"}, question=${payload.database.questionStatus}`,
+    ].join(" · ");
+  } catch (error) {
+    testOutput.textContent = `Тест оплаты: ошибка - ${error.message}`;
+  } finally {
+    testPaymentFlowButton.disabled = false;
+  }
+}
+
 async function runTest(url) {
   await saveConfig();
   setStatus("Генерирую тест");
@@ -1275,7 +1298,12 @@ function renderListeners() {
       const row = document.createElement("div");
       row.className = "listener-question";
       row.innerHTML = `<b></b><small></small><p></p>`;
-      row.querySelector("b").textContent = question.status;
+      const paymentLabel = question.paymentStatus === "paid"
+        ? " · оплачено"
+        : question.paymentStatus === "waiting_payment"
+          ? ` · ожидает оплату ${question.priceStars || 0} Stars`
+          : "";
+      row.querySelector("b").textContent = `${question.status}${paymentLabel}`;
       row.querySelector("small").textContent = question.question;
       row.querySelector("p").textContent = question.text || question.error || "Ответ еще готовится";
       list.append(row);

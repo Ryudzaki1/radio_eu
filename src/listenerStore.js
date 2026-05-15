@@ -1,5 +1,10 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const {
+  syncListenerQuestionCreated,
+  syncListenerQuestionPaid,
+  syncListenerQuestionStatus,
+} = require("./database");
 
 const MAX_USERS = 9;
 const FREE_QUESTIONS = 1;
@@ -120,6 +125,9 @@ async function acceptQuestion(config, input) {
     };
     store.questions.push(question);
     await writeListenerStore(config, store);
+    syncListenerQuestionCreated(config, user, question).catch((error) => {
+      console.warn(`listener question create db sync failed: ${error.message}`);
+    });
     return { ok: true, user, question, requiresPayment };
   });
 }
@@ -144,6 +152,9 @@ async function markQuestionPaid(config, id, payment = {}) {
       updatedAt: new Date().toISOString(),
     });
     await writeListenerStore(config, store);
+    syncListenerQuestionPaid(config, question, payment).catch((error) => {
+      console.warn(`listener question payment db sync failed: ${error.message}`);
+    });
     return { ok: true, question };
   });
 }
@@ -155,6 +166,9 @@ async function updateQuestion(config, id, patch) {
     if (!question) return null;
     Object.assign(question, patch, { updatedAt: new Date().toISOString() });
     await writeListenerStore(config, store);
+    syncListenerQuestionStatus(config, question).catch((error) => {
+      console.warn(`listener question status db sync failed: ${error.message}`);
+    });
     return question;
   });
 }
