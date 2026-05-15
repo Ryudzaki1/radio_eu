@@ -308,7 +308,7 @@ function createServer(config) {
       }
 
       if (request.method === "POST" && url.pathname === "/api/admin/broadcast/stop") {
-        const status = await topicCycle.stop();
+        const status = await topicCycle.pauseForBroadcastStop();
         const result = broadcast.stopBroadcast("admin_stop");
         await emitAdmin(config, "topic-cycle", status);
         await writeSystemLog(config, "admin_broadcast_stop", result);
@@ -318,8 +318,10 @@ function createServer(config) {
 
       if (request.method === "POST" && url.pathname === "/api/admin/broadcast/restore") {
         const result = broadcast.restoreBroadcast("admin_restore");
+        const topicCycleStatus = await topicCycle.resumeAfterBroadcastRestore();
+        await emitAdmin(config, "topic-cycle", topicCycleStatus);
         await writeSystemLog(config, "admin_broadcast_restore", result);
-        await sendJson(response, 200, { restored: true, ...result });
+        await sendJson(response, 200, { restored: true, topicCycle: topicCycleStatus, ...result });
         return;
       }
 
@@ -665,6 +667,8 @@ function createTopicCycleController(config, broadcast) {
     getStatus,
     start,
     stop,
+    pauseForBroadcastStop,
+    resumeAfterBroadcastRestore,
   };
 
   async function restore() {
@@ -747,6 +751,45 @@ function createTopicCycleController(config, broadcast) {
       mode: state.mode,
       reason: state.completionReason,
     });
+    return getStatus();
+  }
+
+  async function pauseForBroadcastStop() {
+    if (!state.active) return getStatus();
+    clearTimer();
+    state = {
+      ...state,
+      active: false,
+      nextRunAt: null,
+      stoppedAt: new Date().toISOString(),
+      completionReason: "broadcast_stop",
+    };
+    await saveState();
+    await writeSystemLog(config, "topic_cycle_paused_for_broadcast", {
+      runCount: state.runCount,
+      mode: state.mode,
+      reason: state.completionReason,
+    });
+    return getStatus();
+  }
+
+  async function resumeAfterBroadcastRestore() {
+    if (state.active || state.completionReason !== "broadcast_stop") return getStatus();
+    state = {
+      ...state,
+      active: true,
+      nextRunAt: null,
+      stoppedAt: null,
+      completionReason: null,
+    };
+    await saveState();
+    await writeSystemLog(config, "topic_cycle_resumed_after_broadcast", {
+      runCount: state.runCount,
+      mode: state.mode,
+      selectedTopicName: state.selectedTopicName,
+      order: state.order,
+    });
+    scheduleNext(1_000);
     return getStatus();
   }
 

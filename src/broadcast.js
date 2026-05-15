@@ -20,11 +20,13 @@ class BroadcastStream {
     this.activeMusicIndex = -1;
     this.activeMusicProcess = null;
     this.activeLiveProcess = null;
+    this.activeVoiceProcess = null;
     this.activeLiveSegment = null;
     this.liveInterruptedForMusic = false;
     this.interruptMusicAfterCurrent = false;
     this.musicInterrupted = false;
     this.voiceBridgeAfterMusicInterrupt = false;
+    this.voiceInterrupted = false;
     this.currentPlayItem = null;
     this.currentMusic = null;
     this.running = false;
@@ -284,6 +286,7 @@ class BroadcastStream {
     this.interruptMusicAfterCurrent = false;
     this.musicInterrupted = false;
     this.voiceBridgeAfterMusicInterrupt = false;
+    this.voiceInterrupted = false;
     this.nextVoiceAllowedAt = 0;
     this.currentTrackIndex = 0;
     this.currentTrackOffset = 0;
@@ -293,11 +296,15 @@ class BroadcastStream {
   }
 
   stopActiveProcesses() {
-    for (const process of [this.activeLiveProcess, this.activeMusicProcess]) {
+    if (this.activeVoiceProcess && !this.activeVoiceProcess.killed) {
+      this.voiceInterrupted = true;
+    }
+    for (const process of [this.activeLiveProcess, this.activeMusicProcess, this.activeVoiceProcess]) {
       if (process && !process.killed) process.kill("SIGTERM");
     }
     this.activeLiveProcess = null;
     this.activeMusicProcess = null;
+    this.activeVoiceProcess = null;
   }
 
   getStatus() {
@@ -605,68 +612,6 @@ class BroadcastStream {
     return () => timers.forEach((timer) => clearTimeout(timer));
   }
 
-  async streamPlayQueue(options) {
-    const fade = Math.max(0.5, options.fadeSeconds);
-    const liveLead = Math.max(0, options.liveLeadSeconds || 0);
-    const liveOutDuration = liveLead + fade;
-    const filterParts = [
-      `[0:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=duration=${liveOutDuration.toFixed(3)},asetpts=PTS-STARTPTS[liveOut]`,
-    ];
-    const labels = ["liveOut"];
-    options.items.forEach((item, index) => {
-      const inputIndex = index + 1;
-      const label = `play${index}`;
-      filterParts.push(`[${inputIndex}:a]aformat=sample_rates=44100:channel_layouts=stereo,asetpts=PTS-STARTPTS[${label}]`);
-      labels.push(label);
-    });
-    const liveInInput = options.items.length + 1;
-    filterParts.push(`[${liveInInput}:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=duration=${fade.toFixed(3)},asetpts=PTS-STARTPTS[liveIn]`);
-    labels.push("liveIn");
-
-    let previous = labels[0];
-    for (let index = 1; index < labels.length; index += 1) {
-      const output = index === labels.length - 1 ? "mixed" : `xfade${index}`;
-      filterParts.push(`[${previous}][${labels[index]}]acrossfade=d=${fade.toFixed(3)}:c1=tri:c2=tri[${output}]`);
-      previous = output;
-    }
-    filterParts.push("[mixed]alimiter=limit=0.98:level=false[out]");
-
-    const playInputs = [];
-    for (const item of options.items) {
-      playInputs.push("-re", "-i", item.musicPath);
-    }
-
-    const args = [
-      "-hide_banner",
-      "-loglevel", "error",
-      "-re",
-      "-ss", Math.max(0, options.liveOutStart).toFixed(3),
-      "-t", liveOutDuration.toFixed(3),
-      "-i", options.liveOutPath,
-      ...playInputs,
-      "-re",
-      "-ss", Math.max(0, options.liveInStart).toFixed(3),
-      "-t", fade.toFixed(3),
-      "-i", options.liveInPath,
-      "-filter_complex", filterParts.join(";"),
-      "-map", "[out]",
-      "-vn",
-      "-ar", "44100",
-      "-ac", "2",
-      "-b:a", this.audioBitrate,
-      "-f", "mp3",
-      "-write_xing", "0",
-      "pipe:1",
-    ];
-
-    const totalDuration = liveLead + options.durations.reduce((sum, duration) => sum + duration, 0) + fade * 2;
-    return this.runFfmpeg(args, totalDuration * 1000 + 20_000, {
-      onProcess: (process) => {
-        this.activeMusicProcess = process;
-      },
-    });
-  }
-
   async readTracks() {
     try {
       return await listTracks(this.config.liveMusicDir, { urlPrefix: "/music/live" });
@@ -750,112 +695,6 @@ class BroadcastStream {
       this.currentTrackIndex = (this.currentTrackIndex + 1) % tracks.length;
       this.currentTrackOffset = 0;
     }
-  }
-
-  async streamMusicInsert(tracks, item) {
-    let savedIndex = this.currentTrackIndex % tracks.length;
-    let savedOffset = Math.max(0, this.currentTrackOffset);
-    let savedTrack = tracks[savedIndex];
-    let savedPath = resolveInside(this.config.liveMusicDir, savedTrack.file);
-    const insertDuration = await this.probeDuration(item.musicPath);
-    let savedDuration = await this.probeDuration(savedPath);
-    if (savedOffset >= savedDuration - 1) {
-      savedIndex = (savedIndex + 1) % tracks.length;
-      savedOffset = 0;
-      savedTrack = tracks[savedIndex];
-      savedPath = resolveInside(this.config.liveMusicDir, savedTrack.file);
-      savedDuration = await this.probeDuration(savedPath);
-    }
-    const fadeSeconds = Math.max(1, Math.min(3, insertDuration / 3, Math.max(1, savedDuration - savedOffset)));
-    let returnIndex = savedIndex;
-    let returnTrack = savedTrack;
-    let returnPath = savedPath;
-    let returnOffset = savedOffset + fadeSeconds;
-    if (returnOffset >= savedDuration - 0.5) {
-      returnIndex = (savedIndex + 1) % tracks.length;
-      returnTrack = tracks[returnIndex];
-      returnPath = resolveInside(this.config.liveMusicDir, returnTrack.file);
-      returnOffset = 0;
-      savedDuration = await this.probeDuration(returnPath);
-    }
-    const middleStart = fadeSeconds;
-    const middleDuration = Math.max(0, insertDuration - fadeSeconds * 2);
-
-    this.updateStatus({
-      mode: "music_transition",
-      title: `Переход к треку: ${item.title}`,
-      queueLength: this.queue.length,
-      musicQueueLength: this.musicQueue.length,
-    });
-    await this.streamPlayInsert({
-      liveOutPath: savedPath,
-      liveOutStart: savedOffset,
-      playPath: item.musicPath,
-      liveInPath: returnPath,
-      liveInStart: returnOffset,
-      fadeSeconds,
-      playDuration: insertDuration,
-      title: item.title,
-    });
-
-    this.currentTrackIndex = returnIndex;
-    this.currentTrackOffset = returnOffset + fadeSeconds;
-    if (this.currentTrackOffset >= savedDuration - 0.05) {
-      this.currentTrackIndex = (savedIndex + 1) % tracks.length;
-      this.currentTrackOffset = 0;
-    }
-  }
-
-  async streamPlayInsert(options) {
-    const fade = Math.max(0.5, options.fadeSeconds);
-    const duration = Math.max(fade * 2, options.playDuration);
-    const middleDuration = Math.max(0, duration - fade * 2);
-    const playEndStart = Math.max(0, duration - fade);
-
-    const filter = [
-      `[1:a]asplit=3[playStartSrc][playMiddleSrc][playEndSrc]`,
-      `[0:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=duration=${fade.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=out:st=0:d=${fade.toFixed(3)}[liveOut]`,
-      `[playStartSrc]aformat=sample_rates=44100:channel_layouts=stereo,atrim=start=0:duration=${fade.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${fade.toFixed(3)}[playIn]`,
-      `[liveOut][playIn]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[first]`,
-      `[playMiddleSrc]aformat=sample_rates=44100:channel_layouts=stereo,atrim=start=${fade.toFixed(3)}:duration=${middleDuration.toFixed(3)},asetpts=PTS-STARTPTS[middle]`,
-      `[playEndSrc]aformat=sample_rates=44100:channel_layouts=stereo,atrim=start=${playEndStart.toFixed(3)}:duration=${fade.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=out:st=0:d=${fade.toFixed(3)}[playOut]`,
-      `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=duration=${fade.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${fade.toFixed(3)}[liveIn]`,
-      `[playOut][liveIn]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[last]`,
-      `[first][middle][last]concat=n=3:v=0:a=1,alimiter=limit=0.98:level=false[out]`,
-    ].join(";");
-
-    const args = [
-      "-hide_banner",
-      "-loglevel", "error",
-      "-re",
-      "-ss", Math.max(0, options.liveOutStart).toFixed(3),
-      "-t", fade.toFixed(3),
-      "-i", options.liveOutPath,
-      "-re",
-      "-i", options.playPath,
-      "-re",
-      "-ss", Math.max(0, options.liveInStart).toFixed(3),
-      "-t", fade.toFixed(3),
-      "-i", options.liveInPath,
-      "-filter_complex", filter,
-      "-map", "[out]",
-      "-vn",
-      "-ar", "44100",
-      "-ac", "2",
-      "-b:a", this.audioBitrate,
-      "-f", "mp3",
-      "-write_xing", "0",
-      "pipe:1",
-    ];
-
-    this.updateStatus({
-      mode: "music_insert",
-      title: options.title,
-      queueLength: this.queue.length,
-      musicQueueLength: this.musicQueue.length,
-    });
-    const result = await this.runFfmpeg(args, duration * 1000 + 12_000);
-    if (!result.ok || result.bytes < 8192) console.warn(`music insert failed: ${options.title}; ${result.stderr}`);
   }
 
   async streamSingleMusic(filePath, start, duration, title) {
@@ -1021,10 +860,22 @@ class BroadcastStream {
     }
 
     console.log(`Broadcast voice segment start: ${voiceTitle}; prelude=${preludeSeconds}s; voiceStart=${voiceStart}s; voiceDuration=${voiceDuration}s`);
-    const result = await this.runFfmpeg(args, totalDuration * 1000 + 12_000);
+    this.voiceInterrupted = false;
+    const result = await this.runFfmpeg(args, totalDuration * 1000 + 12_000, {
+      onProcess: (process) => {
+        this.activeVoiceProcess = process;
+      },
+    });
+    this.activeVoiceProcess = null;
     timers.forEach((timer) => clearTimeout(timer));
     console.log(`Broadcast voice segment end: ${voiceTitle}; ok=${result.ok}; bytes=${result.bytes}`);
-    if (result.ok && result.bytes > 8192) {
+    if (this.voiceInterrupted) {
+      this.log("voice_segment_cancelled", {
+        title: voiceTitle,
+        source: item.payload?.source || "unknown",
+        bytes: result.bytes,
+      });
+    } else if (result.ok && result.bytes > 8192) {
       await onStartPromise;
       this.log("voice_segment_end", {
         title: voiceTitle,

@@ -438,8 +438,13 @@ async function recordAirItem(client, event, broadcastEventId) {
     return;
   }
 
-  if (event.event === "voice_segment_end" || event.event === "voice_segment_error") {
-    const status = event.event === "voice_segment_error" ? "failed" : "finished";
+  if (event.event === "voice_segment_end" || event.event === "voice_segment_error" || event.event === "voice_segment_cancelled") {
+    const status = event.event === "voice_segment_error"
+      ? "failed"
+      : event.event === "voice_segment_cancelled"
+        ? "cancelled"
+        : "finished";
+    const statusesToClose = event.event === "voice_segment_cancelled" ? ["started", "cancelled"] : ["started"];
     const updated = await client.query(
       `UPDATE broadcast_air_items
        SET status = $1,
@@ -451,15 +456,16 @@ async function recordAirItem(client, event, broadcastEventId) {
          SELECT id
          FROM broadcast_air_items
          WHERE item_type IN ('host_voice', 'listener_question')
-           AND status = 'started'
-           AND title = $5
-           AND started_at <= $2
-         ORDER BY started_at DESC
-         LIMIT 1
-       )`,
-      [status, event.startedAt, JSON.stringify({ endEvent: event.metadata }), broadcastEventId, event.title],
+            AND status = ANY($6::text[])
+            AND title = $5
+            AND started_at <= $2
+          ORDER BY started_at DESC
+          LIMIT 1
+        )`,
+      [status, event.startedAt, JSON.stringify({ endEvent: event.metadata }), broadcastEventId, event.title, statusesToClose],
     );
     if (updated.rowCount > 0) return;
+    if (event.event === "voice_segment_cancelled") return;
 
     await insertAirItem(client, {
       itemKey: `voice-end:${event.eventKey}`,
@@ -481,6 +487,8 @@ async function recordAirItem(client, event, broadcastEventId) {
   }
 
   if (event.event === "broadcast_stopped" || event.event === "admin_broadcast_stop") {
+    await cancelOpenAirItems(client, "host_voice", event.startedAt, ["started"]);
+    await cancelOpenAirItems(client, "listener_question", event.startedAt, ["started"]);
     await finishOpenAirItems(client, "live_track", event.startedAt, ["started"]);
     await finishOpenAirItems(client, "play_track", event.startedAt, ["started"]);
     await insertAirItem(client, {
@@ -558,6 +566,20 @@ async function finishOpenAirItems(client, itemType, endedAt, statuses) {
   );
 }
 
+async function cancelOpenAirItems(client, itemType, endedAt, statuses) {
+  await client.query(
+    `UPDATE broadcast_air_items
+     SET status = 'cancelled',
+         ended_at = $1,
+         duration_seconds = coalesce(duration_seconds, extract(epoch FROM $1 - started_at)::numeric(12, 3))
+     WHERE item_type = $2
+       AND status = ANY($3::text[])
+       AND started_at <= $1
+       AND ended_at IS NULL`,
+    [endedAt, itemType, statuses],
+  );
+}
+
 function normalizeBroadcastEvent(entry) {
   const event = String(entry?.event || "");
   if (!event) return null;
@@ -625,7 +647,7 @@ function getBroadcastStatus(event) {
   if (event.endsWith("_start") || event.startsWith("transition_")) return "started";
   if (event.endsWith("_end")) return "ended";
   if (event.endsWith("_error")) return "failed";
-  if (event.includes("stopped") || event.includes("cleared")) return "cancelled";
+  if (event.endsWith("_cancelled") || event.includes("stopped") || event.includes("cleared")) return "cancelled";
   return "observed";
 }
 
