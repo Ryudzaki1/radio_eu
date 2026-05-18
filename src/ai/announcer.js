@@ -19,8 +19,13 @@ async function createGreeting(config, input = {}) {
   const admin = await readAdminConfig(config);
   const promptSet = getActivePromptSet(admin);
   const pool = await getReusableVoiceAssets(config, "greeting", promptSet, config.elevenlabs.voiceId);
-  if (!input.forceGenerate && pool.currentRevision.length >= STANDARD_VOICE_POOL_LIMIT) {
-    return toReusableVoicePayload(pickReusableVoiceAsset(pool.currentRevision), "greeting", "hello", "pool");
+  if (!input.forceGenerate && pool.anyRevision.length >= STANDARD_VOICE_POOL_LIMIT) {
+    return toReusableVoicePayload(
+      pickReusableVoiceAsset(pool.currentRevision.length ? pool.currentRevision : pool.anyRevision),
+      "greeting",
+      "hello",
+      "pool",
+    );
   }
   const text = await generateGreeting(config.deepseek, admin).catch((error) => {
     console.warn(`DeepSeek greeting fallback: ${error.message}`);
@@ -48,8 +53,13 @@ async function createFarewell(config, input = {}) {
   const admin = await readAdminConfig(config);
   const promptSet = getActivePromptSet(admin);
   const pool = await getReusableVoiceAssets(config, "farewell", promptSet, config.elevenlabs.voiceId);
-  if (!input.forceGenerate && pool.currentRevision.length >= STANDARD_VOICE_POOL_LIMIT) {
-    return toReusableVoicePayload(pickReusableVoiceAsset(pool.currentRevision), "farewell", "bye", "pool");
+  if (!input.forceGenerate && pool.anyRevision.length >= STANDARD_VOICE_POOL_LIMIT) {
+    return toReusableVoicePayload(
+      pickReusableVoiceAsset(pool.currentRevision.length ? pool.currentRevision : pool.anyRevision),
+      "farewell",
+      "bye",
+      "pool",
+    );
   }
   const text = await generateFarewell(config.deepseek, admin).catch((error) => {
     console.warn(`DeepSeek farewell fallback: ${error.message}`);
@@ -115,6 +125,33 @@ async function createFactUnlocked(config, input = {}) {
     };
   }
 
+  const reusableArchived = getAnyArchivedFactForSelection(
+    log,
+    config.elevenlabs.voiceId,
+    topicName,
+    subtopicName,
+    promptSet.hostId,
+  );
+  if (reusableArchived && !input.forceGenerate) {
+    return {
+      text: reusableArchived.text,
+      audioUrl: reusableArchived.audioUrl,
+      archived: true,
+      archivePath: reusableArchived.archivePath,
+      theme: reusableArchived.topic,
+      topic: reusableArchived.topic,
+      topicIndex: selection.topicIndex,
+      subtopic: reusableArchived.subtopic,
+      subtopicIndex: selection.subtopicIndex,
+      kind: "facts",
+      voiceId: reusableArchived.voiceId,
+      promptRevision: reusableArchived.promptRevision,
+      hostId: reusableArchived.hostId,
+      hostName: reusableArchived.hostName,
+      source: "archive-reuse",
+    };
+  }
+
   const recentFacts = getRecentFacts(log, topicName, subtopicName, 8);
 
   const text = await generateFact(config.deepseek, topicName, subtopicName, admin, recentFacts, selection).catch((error) => {
@@ -134,33 +171,6 @@ async function createFactUnlocked(config, input = {}) {
     text,
   });
   if (!payload.audioUrl) {
-    const fallback = getAnyArchivedFactForSelection(
-      log,
-      config.elevenlabs.voiceId,
-      topicName,
-      subtopicName,
-      promptSet.hostId,
-    );
-    if (fallback) {
-      return {
-        text: fallback.text,
-        audioUrl: fallback.audioUrl,
-        archived: true,
-        archivePath: fallback.archivePath,
-        theme: fallback.topic,
-        topic: fallback.topic,
-        topicIndex: selection.topicIndex,
-        subtopic: fallback.subtopic,
-        subtopicIndex: selection.subtopicIndex,
-        kind: "facts",
-        voiceId: fallback.voiceId,
-        promptRevision: fallback.promptRevision,
-        hostId: fallback.hostId,
-        hostName: fallback.hostName,
-        audioError: payload.audioError,
-        source: "archive-fallback",
-      };
-    }
     return { ...payload, source: "generation-failed" };
   }
   await addFactLogEntry(config, payload);
