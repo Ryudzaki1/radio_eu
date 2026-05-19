@@ -14,7 +14,6 @@ CREATE TABLE IF NOT EXISTS broadcast_air_items (
   position_seconds NUMERIC(12, 3),
   listener_question_id UUID REFERENCES listener_questions(id) ON DELETE SET NULL,
   audio_asset_id UUID REFERENCES audio_assets(id) ON DELETE SET NULL,
-  broadcast_event_id UUID REFERENCES broadcast_events(id) ON DELETE SET NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -76,7 +75,7 @@ WITH live_rows AS (
 )
 INSERT INTO broadcast_air_items (
   item_key, item_type, status, title, source, source_file, topic, subtopic,
-  started_at, ended_at, duration_seconds, position_seconds, broadcast_event_id, metadata
+  started_at, ended_at, duration_seconds, position_seconds, metadata
 )
 SELECT
   'live:' || event_key,
@@ -94,7 +93,6 @@ SELECT
     ELSE duration_seconds
   END,
   position_seconds,
-  id,
   metadata
 FROM live_rows
 ON CONFLICT (item_key) DO NOTHING;
@@ -131,7 +129,7 @@ voice_pairs AS (
 )
 INSERT INTO broadcast_air_items (
   item_key, item_type, status, title, source, source_file, topic, subtopic,
-  started_at, ended_at, duration_seconds, position_seconds, broadcast_event_id, metadata
+  started_at, ended_at, duration_seconds, position_seconds, metadata
 )
 SELECT
   'voice:' || event_key,
@@ -146,7 +144,6 @@ SELECT
   ended_at,
   coalesce(duration_seconds, CASE WHEN ended_at IS NULL THEN NULL ELSE extract(epoch FROM ended_at - started_at)::numeric(12, 3) END),
   position_seconds,
-  id,
   metadata
 FROM voice_pairs
 ON CONFLICT (item_key) DO NOTHING;
