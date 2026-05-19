@@ -1,4 +1,4 @@
-FROM node:22-alpine
+FROM node:22-alpine3.23
 
 WORKDIR /app
 
@@ -11,7 +11,9 @@ ENV ADMIN_CONFIG_PATH=/cache/config/admin.json
 ENV FACT_LOG_PATH=/cache/config/fact-log.json
 
 USER root
-RUN sed -i 's|https://dl-cdn.alpinelinux.org|http://dl-cdn.alpinelinux.org|g' /etc/apk/repositories \
+ARG APK_MIRROR=http://mirror.yandex.ru/mirrors/alpine
+ARG ALPINE_VERSION=3.23
+RUN printf "%s/v%s/main\n%s/v%s/community\n" "$APK_MIRROR" "$ALPINE_VERSION" "$APK_MIRROR" "$ALPINE_VERSION" > /etc/apk/repositories \
   && apk add --no-cache ffmpeg
 
 COPY package.json package-lock.json ./
