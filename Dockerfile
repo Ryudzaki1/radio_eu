@@ -11,7 +11,8 @@ ENV ADMIN_CONFIG_PATH=/cache/config/admin.json
 ENV FACT_LOG_PATH=/cache/config/fact-log.json
 
 USER root
-RUN apk add --no-cache ffmpeg
+RUN sed -i 's|https://dl-cdn.alpinelinux.org|http://dl-cdn.alpinelinux.org|g' /etc/apk/repositories \
+  && apk add --no-cache ffmpeg
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
