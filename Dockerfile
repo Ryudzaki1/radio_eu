@@ -10,15 +10,15 @@ ENV ARCHIVE_DIR=/cache/archive
 ENV ADMIN_CONFIG_PATH=/cache/config/admin.json
 ENV FACT_LOG_PATH=/cache/config/fact-log.json
 
+USER root
+RUN apk add --no-cache ffmpeg
+
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY server.js index.html script.js styles.css admin-login.html admin.html admin.js ./
 COPY assets ./assets
 COPY src ./src
 COPY bot ./bot
-
-USER root
-RUN apk add --no-cache ffmpeg
 
 RUN mkdir -p /music /cache/announcements /cache/archive /cache/config \
   && chown -R node:node /app /music /cache

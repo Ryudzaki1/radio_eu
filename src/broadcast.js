@@ -1046,7 +1046,9 @@ class BroadcastStream {
       });
       ffmpeg.on("close", (code) => {
         clearTimeout(timer);
-        if (code !== 0 && stderr.trim()) console.warn(`ffmpeg exited ${code}: ${stderr.trim()}`);
+        if (code !== 0 && stderr.trim() && !isExpectedFfmpegInterrupt(stderr)) {
+          console.warn(`ffmpeg exited ${code}: ${stderr.trim()}`);
+        }
         resolve({ ok: code === 0, bytes, stderr });
       });
     });
@@ -1269,6 +1271,10 @@ function clampGain(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
   return Math.min(Math.max(number, 0), 3);
+}
+
+function isExpectedFfmpegInterrupt(stderr) {
+  return /Immediate exit requested|Exiting normally, received signal/i.test(String(stderr || ""));
 }
 
 function buildMusicBedFilter(segments, volumeExpr) {

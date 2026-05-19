@@ -500,7 +500,7 @@ function createServer(config) {
           telegramPaymentChargeId: body.telegramPaymentChargeId,
           rawPayload: body.rawPayload,
         });
-        if (result.ok) enqueueListenerQuestion(config, broadcast, result.question);
+        if (result.ok && !result.alreadyPaid) enqueueListenerQuestion(config, broadcast, result.question);
         await emitAdmin(config, "listeners", await readListenerStore(config));
         await sendJson(response, result.ok ? 200 : 409, result);
         return;

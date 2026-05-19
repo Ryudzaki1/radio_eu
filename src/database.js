@@ -10,6 +10,8 @@ try {
 let pool = null;
 let poolKey = "";
 let warnedUnavailable = false;
+const SYSTEM_EVENTS_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+let systemEventsCleanupDueAt = 0;
 
 function getPool(config) {
   const database = config?.database;
@@ -60,6 +62,20 @@ async function recordSystemEvent(config, entry) {
       JSON.stringify(entry),
       entry.ts ? new Date(entry.ts) : new Date(),
     ],
+  );
+  cleanupOldSystemEvents(client).catch((error) => {
+    console.warn(`system event db cleanup failed: ${error.message}`);
+  });
+}
+
+async function cleanupOldSystemEvents(client) {
+  const now = Date.now();
+  if (now < systemEventsCleanupDueAt) return;
+  systemEventsCleanupDueAt = now + 60 * 60 * 1000;
+  await client.query(
+    `DELETE FROM system_events
+     WHERE created_at < $1`,
+    [new Date(now - SYSTEM_EVENTS_RETENTION_MS)],
   );
 }
 
@@ -659,11 +675,8 @@ function shouldRecordSystemEvent(event) {
   const name = String(event || "");
   if (!name) return false;
   if (name.startsWith("admin_")) return true;
-  if (name.startsWith("api_")) return true;
   if (name.startsWith("listener_")) return true;
-  if (name === "topic_cycle_started" || name === "topic_cycle_stopped" || name === "topic_cycle_completed" || name === "topic_cycle_error") return true;
-  if (name === "voice_generation_failed" || name === "voice_enqueue_failed") return true;
-  if (name === "music_insert_failed") return true;
+  if (name === "topic_cycle_started" || name === "topic_cycle_stopped" || name === "topic_cycle_completed") return true;
   return false;
 }
 

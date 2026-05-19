@@ -73,10 +73,10 @@ async function poll() {
       });
 
       for (const update of updates.result || []) {
-        offset = update.update_id + 1;
         if (update.message) await handleMessage(update.message);
         if (update.callback_query) await handleCallbackQuery(update.callback_query);
         if (update.pre_checkout_query) await handlePreCheckoutQuery(update.pre_checkout_query);
+        offset = update.update_id + 1;
       }
     } catch (error) {
       console.error(`poll error: ${error.message}`);

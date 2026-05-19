@@ -142,7 +142,12 @@ async function markQuestionPaid(config, id, payment = {}) {
     const store = await readListenerStore(config);
     const question = store.questions.find((item) => item.id === String(id));
     if (!question) return { ok: false, reason: "not_found" };
-    if (question.status !== "waiting_payment") return { ok: false, reason: "invalid_status", question };
+    if (question.status !== "waiting_payment") {
+      const alreadyPaid = question.paymentStatus === "paid"
+        && (!payment.telegramPaymentChargeId || question.paymentChargeId === String(payment.telegramPaymentChargeId));
+      if (alreadyPaid) return { ok: true, alreadyPaid: true, question };
+      return { ok: false, reason: "invalid_status", question };
+    }
 
     Object.assign(question, {
       status: "queued",
