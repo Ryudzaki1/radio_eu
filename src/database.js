@@ -387,7 +387,7 @@ function normalizeListenerQuestionStatus(status) {
   }
 }
 
-async function recordAirItem(client, event, broadcastEventId) {
+async function recordAirItem(client, event) {
   if (event.event === "live_music_start") {
     await finishOpenAirItems(client, "host_voice", event.startedAt, ["started"]);
     await finishOpenAirItems(client, "listener_question", event.startedAt, ["started"]);
@@ -405,7 +405,6 @@ async function recordAirItem(client, event, broadcastEventId) {
       endedAt: null,
       durationSeconds: event.durationSeconds,
       positionSeconds: event.positionSeconds,
-      broadcastEventId,
       metadata: event.metadata,
     });
     return;
@@ -428,7 +427,6 @@ async function recordAirItem(client, event, broadcastEventId) {
       endedAt: null,
       durationSeconds: event.durationSeconds,
       positionSeconds: event.positionSeconds,
-      broadcastEventId,
       metadata: event.metadata,
     });
     return;
@@ -448,7 +446,6 @@ async function recordAirItem(client, event, broadcastEventId) {
       endedAt: null,
       durationSeconds: event.durationSeconds,
       positionSeconds: event.positionSeconds,
-      broadcastEventId,
       metadata: event.metadata,
     });
     return;
@@ -466,19 +463,18 @@ async function recordAirItem(client, event, broadcastEventId) {
        SET status = $1,
            ended_at = $2,
            duration_seconds = coalesce(duration_seconds, extract(epoch FROM $2 - started_at)::numeric(12, 3)),
-           metadata = metadata || $3::jsonb,
-           broadcast_event_id = coalesce(broadcast_event_id, $4)
+           metadata = metadata || $3::jsonb
        WHERE id = (
          SELECT id
          FROM broadcast_air_items
          WHERE item_type IN ('host_voice', 'listener_question')
-            AND status = ANY($6::text[])
-            AND title = $5
+            AND status = ANY($5::text[])
+            AND title = $4
             AND started_at <= $2
           ORDER BY started_at DESC
           LIMIT 1
         )`,
-      [status, event.startedAt, JSON.stringify({ endEvent: event.metadata }), broadcastEventId, event.title, statusesToClose],
+      [status, event.startedAt, JSON.stringify({ endEvent: event.metadata }), event.title, statusesToClose],
     );
     if (updated.rowCount > 0) return;
     if (event.event === "voice_segment_cancelled") return;
@@ -496,7 +492,6 @@ async function recordAirItem(client, event, broadcastEventId) {
       endedAt: event.startedAt,
       durationSeconds: event.durationSeconds,
       positionSeconds: event.positionSeconds,
-      broadcastEventId,
       metadata: event.metadata,
     });
     return;
@@ -515,7 +510,6 @@ async function recordAirItem(client, event, broadcastEventId) {
       source: event.source,
       startedAt: event.startedAt,
       endedAt: event.startedAt,
-      broadcastEventId,
       metadata: event.metadata,
     });
     return;
@@ -530,7 +524,6 @@ async function recordAirItem(client, event, broadcastEventId) {
       source: event.source,
       startedAt: event.startedAt,
       endedAt: event.startedAt,
-      broadcastEventId,
       metadata: event.metadata,
     });
   }
@@ -540,9 +533,9 @@ async function insertAirItem(client, item) {
   await client.query(
     `INSERT INTO broadcast_air_items (
        item_key, item_type, status, title, source, source_file, topic, subtopic,
-       started_at, ended_at, duration_seconds, position_seconds, broadcast_event_id, metadata
+       started_at, ended_at, duration_seconds, position_seconds, metadata
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      ON CONFLICT (item_key) DO UPDATE
      SET status = EXCLUDED.status,
          ended_at = coalesce(EXCLUDED.ended_at, broadcast_air_items.ended_at),
@@ -562,7 +555,6 @@ async function insertAirItem(client, item) {
       item.endedAt || null,
       item.durationSeconds || null,
       item.positionSeconds || null,
-      item.broadcastEventId || null,
       JSON.stringify(item.metadata || {}),
     ],
   );

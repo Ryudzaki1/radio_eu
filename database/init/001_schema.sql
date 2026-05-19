@@ -110,28 +110,6 @@ CREATE TABLE IF NOT EXISTS system_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS broadcast_events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  event_key TEXT NOT NULL UNIQUE,
-  event TEXT NOT NULL,
-  category TEXT NOT NULL DEFAULT 'system' CHECK (category IN ('live_music', 'play_music', 'voice', 'transition', 'queue', 'system')),
-  status TEXT NOT NULL DEFAULT 'observed' CHECK (status IN ('queued', 'started', 'ended', 'failed', 'cancelled', 'observed')),
-  title TEXT,
-  source TEXT,
-  source_file TEXT,
-  topic TEXT,
-  subtopic TEXT,
-  duration_seconds NUMERIC(12, 3),
-  position_seconds NUMERIC(12, 3),
-  listener_question_id UUID REFERENCES listener_questions(id) ON DELETE SET NULL,
-  audio_asset_id UUID REFERENCES audio_assets(id) ON DELETE SET NULL,
-  broadcast_job_id UUID REFERENCES broadcast_jobs(id) ON DELETE SET NULL,
-  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  ended_at TIMESTAMPTZ,
-  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
 CREATE TABLE IF NOT EXISTS broadcast_air_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   item_key TEXT NOT NULL UNIQUE,
@@ -148,7 +126,6 @@ CREATE TABLE IF NOT EXISTS broadcast_air_items (
   position_seconds NUMERIC(12, 3),
   listener_question_id UUID REFERENCES listener_questions(id) ON DELETE SET NULL,
   audio_asset_id UUID REFERENCES audio_assets(id) ON DELETE SET NULL,
-  broadcast_event_id UUID REFERENCES broadcast_events(id) ON DELETE SET NULL,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -160,10 +137,6 @@ CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_ready ON broadcast_jobs (status, s
 CREATE INDEX IF NOT EXISTS idx_audio_assets_kind_host ON audio_assets (kind, host_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_ai_usage_events_provider_created ON ai_usage_events (provider, created_at);
 CREATE INDEX IF NOT EXISTS idx_system_events_event_created ON system_events (event, created_at);
-CREATE INDEX IF NOT EXISTS idx_broadcast_events_started ON broadcast_events (started_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_broadcast_events_event_key ON broadcast_events (event_key);
-CREATE INDEX IF NOT EXISTS idx_broadcast_events_category_started ON broadcast_events (category, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_broadcast_events_source_file_started ON broadcast_events (source_file, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_broadcast_air_items_started ON broadcast_air_items (started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_broadcast_air_items_type_started ON broadcast_air_items (item_type, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_broadcast_air_items_status ON broadcast_air_items (status, started_at DESC);

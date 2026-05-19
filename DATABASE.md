@@ -29,9 +29,6 @@ proper migration command later.
 - `audio_assets` - generated mp3 files and their metadata.
 - `broadcast_jobs` - future durable queue for voice, music, topic, and listener
   jobs.
-- `broadcast_events` - compatibility table for old technical broadcast events.
-  New routine broadcast events are intentionally kept in JSONL logs instead of
-  this table.
 - `broadcast_air_items` - clean human-readable on-air timeline. Use this table
   for admin views, reports, and "what was on air" queries.
 - `ai_usage_events` - DeepSeek and ElevenLabs usage accounting.
@@ -54,11 +51,10 @@ Optional links are already reserved:
 - `listener_question_id` -> `listener_questions.id` for paid listener
   questions.
 - `audio_asset_id` -> `audio_assets.id` for generated mp3 files.
-- `broadcast_job_id` -> `broadcast_jobs.id` for the future durable queue.
 
 For now, these optional IDs are usually empty because the current broadcast
 runtime still uses in-memory queues and JSON files. They are reserved for the
-paid-question and durable-queue migration.
+paid-question migration.
 
 Paid Telegram questions are now written into the readable database as well as
 the runtime JSON store:
