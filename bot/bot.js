@@ -450,7 +450,10 @@ async function sendListenOnly(chatId, publicUrl) {
 }
 
 async function sendQuestionPrompt(chatId) {
-  await send(chatId, "Напиши вопрос одним сообщением. Если бесплатный вопрос уже использован, после текста я пришлю оплату на 50 Stars.");
+  await send(chatId, "Напиши вопрос одним сообщением. Если бесплатный вопрос уже использован, после текста я пришлю оплату на 50 Stars.", {
+    force_reply: true,
+    input_field_placeholder: "Вопрос для Sweetie Fox",
+  });
 }
 
 async function startAdminQuestionMode(chatId) {
