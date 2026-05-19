@@ -674,6 +674,7 @@ function normalizeActorType(value) {
 function shouldRecordSystemEvent(event) {
   const name = String(event || "");
   if (!name) return false;
+  if (name === "admin_client_action") return false;
   if (name.startsWith("admin_")) return true;
   if (name.startsWith("listener_")) return true;
   if (name === "topic_cycle_started" || name === "topic_cycle_stopped" || name === "topic_cycle_completed") return true;
