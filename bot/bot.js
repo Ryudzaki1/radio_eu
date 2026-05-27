@@ -743,6 +743,8 @@ async function setupBotInterface() {
         { command: "tokens", description: "Остаток генерации текста и аудио" },
         { command: "stars", description: "Отчет Stars: бот и канал" },
       ],
+    }).catch((error) => {
+      console.warn(`admin command scope skipped for ${chatId}: ${error.message}`);
     });
   }
   await setupBotMenu();
