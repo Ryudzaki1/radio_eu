@@ -22,6 +22,7 @@ COPY server.js index.html script.js styles.css admin-login.html admin.html admin
 COPY assets ./assets
 COPY src ./src
 COPY bot ./bot
+COPY scripts/smoke-tests.js ./scripts/smoke-tests.js
 
 RUN mkdir -p /music /cache/announcements /cache/archive /cache/config \
   && chown -R node:node /app /music /cache

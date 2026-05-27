@@ -40,6 +40,8 @@ proper migration command later.
 - `ai_usage_events` - DeepSeek and ElevenLabs usage accounting.
 - `system_events` - audit trail for admin, bot, listener, and important system
   actions. Routine broadcast events are intentionally not stored here.
+- `funnel_events` - compact business funnel for listener starts, question
+  checkout, paid questions, bot Stars transactions, and channel paid reactions.
 
 ## Broadcast event relationships
 
@@ -85,6 +87,10 @@ Telegram Stars have two tracked income sources:
 Bot-level Star transactions from `getStarTransactions` are copied into
 `bot_star_transactions` for reconciliation. They are not used to enqueue
 questions; successful payments still drive that flow.
+
+Business funnel events are intentionally separate from technical logs. Use
+`funnel_events` for admin/revenue reporting, and keep low-level playback errors
+in JSONL logs under `/cache/logs`.
 
 Useful query:
 

@@ -545,7 +545,7 @@ p,
   white-space: nowrap;
 }
 
-.progress-head strong {
+  .progress-head strong {
   min-width: 0;
   overflow: hidden;
   text-align: right;
@@ -2005,7 +2005,54 @@ html[data-theme="dark"] audio {
     align-items: flex-start;
   }
 
-  .progress-head strong {
+.progress-head strong {
     white-space: normal;
   }
+}
+
+.income-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.income-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-solid);
+  padding: 14px;
+}
+
+.income-card span,
+.income-card small,
+.compact-row span {
+  color: var(--muted);
+}
+
+.income-card strong {
+  display: block;
+  margin: 6px 0;
+  font-size: 24px;
+}
+
+.income-details {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 16px;
+}
+
+.compact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.compact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
 }

@@ -27,8 +27,15 @@ const {
 const { getAudioType, listTracks, resolveInside } = require("./music");
 const { readRecentSystemLogs, writeSystemLog } = require("./systemLog");
 const {
+  buildAdminCsrfToken,
+  getAdminSessionToken,
+  verifyAdminCsrfToken,
+} = require("./security");
+const {
   getPaymentSummary,
+  getRevenueSummary,
   getStarsSummary,
+  recordFunnelEvent,
   recordBotStarTransaction,
   recordChannelReactionCount,
   runPaymentDbSelfTest,
@@ -99,6 +106,11 @@ function createServer(config) {
         return;
       }
 
+      if (requiresCsrf(url.pathname, request.method) && !verifyAdminCsrfToken(request, config)) {
+        await sendJson(response, 403, { error: "CSRF token required" });
+        return;
+      }
+
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/simsim") {
         await sendFile(request, response, path.join(config.rootDir, "admin.html"), staticTypes.get(".html"));
         return;
@@ -138,6 +150,14 @@ function createServer(config) {
 
       if (request.method === "GET" && url.pathname === "/api/admin/events") {
         openEventStream(request, response, adminClients);
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/admin/session") {
+        await sendJson(response, 200, {
+          ok: true,
+          csrfToken: buildAdminCsrfToken(getAdminSessionToken(request), config),
+        });
         return;
       }
 
@@ -240,6 +260,12 @@ function createServer(config) {
 
       if (request.method === "GET" && url.pathname === "/api/admin/ai-usage") {
         await sendJson(response, 200, await getAiUsage(config));
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/admin/revenue") {
+        const summary = await getRevenueSummary(config);
+        await sendJson(response, summary ? 200 : 503, summary || { ok: false, reason: "database_disabled" });
         return;
       }
 
@@ -454,7 +480,14 @@ function createServer(config) {
       }
 
       if (request.method === "POST" && url.pathname === "/api/listeners/start") {
-        const result = await registerListener(config, await readJson(request));
+        const body = await readJson(request);
+        const result = await registerListener(config, body);
+        await trackFunnel(config, {
+          event: "listener_start",
+          telegramId: body.telegramId,
+          username: body.username,
+          metadata: { ok: result.ok, reason: result.reason || null },
+        });
         await emitAdmin(config, "listeners", await readListenerStore(config));
         await sendJson(response, result.ok ? 200 : 409, { ...result, radioUrl: config.publicRadioUrl });
         return;
@@ -475,7 +508,18 @@ function createServer(config) {
       }
 
       if (request.method === "POST" && url.pathname === "/api/listeners/question") {
-        const result = await acceptQuestion(config, await readJson(request));
+        const body = await readJson(request);
+        const result = await acceptQuestion(config, body);
+        await trackFunnel(config, {
+          event: result.requiresPayment ? "question_waiting_payment" : "question_free_accepted",
+          telegramId: body.telegramId,
+          username: body.username,
+          questionId: result.question?.id,
+          source: "telegram_bot",
+          amount: result.question?.priceStars,
+          currency: result.requiresPayment ? "XTR" : null,
+          metadata: { ok: result.ok, status: result.question?.status || null },
+        });
         if (result.ok && !result.requiresPayment) enqueueListenerQuestion(config, broadcast, result.question);
         await emitAdmin(config, "listeners", await readListenerStore(config));
         await sendJson(response, result.ok ? 200 : 403, result);
@@ -491,6 +535,15 @@ function createServer(config) {
           && question.telegramId === String(body.telegramId || "")
           && Number(question.priceStars) === Number(body.amountStars),
         );
+        await trackFunnel(config, {
+          event: ok ? "question_checkout_ok" : "question_checkout_rejected",
+          telegramId: body.telegramId,
+          questionId: body.questionId,
+          source: "telegram_bot",
+          amount: body.amountStars,
+          currency: "XTR",
+          metadata: { ok },
+        });
         await sendJson(response, ok ? 200 : 409, {
           ok,
           reason: ok ? null : "invalid_question",
@@ -510,6 +563,15 @@ function createServer(config) {
           telegramPaymentChargeId: body.telegramPaymentChargeId,
           rawPayload: body.rawPayload,
         });
+        await trackFunnel(config, {
+          event: result.ok ? "question_paid" : "question_payment_rejected",
+          telegramId: body.telegramId,
+          questionId: body.questionId,
+          source: "telegram_bot",
+          amount: result.question?.priceStars,
+          currency: "XTR",
+          metadata: { ok: result.ok, alreadyPaid: result.alreadyPaid || false },
+        });
         if (result.ok && !result.alreadyPaid) enqueueListenerQuestion(config, broadcast, result.question);
         await emitAdmin(config, "listeners", await readListenerStore(config));
         await sendJson(response, result.ok ? 200 : 409, result);
@@ -517,13 +579,45 @@ function createServer(config) {
       }
 
       if (request.method === "POST" && url.pathname === "/api/listeners/channel/reaction") {
-        const result = await recordChannelReactionCount(config, await readJson(request));
+        const body = await readJson(request);
+        const result = await recordChannelReactionCount(config, body);
+        if (result.ok && result.paidDelta > 0) {
+          await trackFunnel(config, {
+            event: "channel_paid_reaction",
+            actorType: "channel",
+            source: "telegram_channel",
+            amount: result.paidDelta,
+            currency: "XTR",
+            metadata: {
+              channelId: result.channelId,
+              channelUsername: result.channelUsername,
+              messageId: result.messageId,
+              paidTotal: result.paidTotal,
+            },
+          });
+        }
         await sendJson(response, result.ok ? 200 : 409, result);
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/api/listeners/stars/transaction") {
-        const result = await recordBotStarTransaction(config, await readJson(request));
+        const body = await readJson(request);
+        const result = await recordBotStarTransaction(config, body);
+        if (result.ok && result.inserted) {
+          await trackFunnel(config, {
+            event: "bot_star_transaction",
+            actorType: "bot",
+            source: "telegram_bot",
+            amount: result.amount,
+            currency: "XTR",
+            metadata: {
+              transactionId: result.transactionId,
+              direction: result.direction,
+              sourceType: result.sourceType,
+              receiverType: result.receiverType,
+            },
+          });
+        }
         await sendJson(response, result.ok ? 200 : 409, result);
         return;
       }
@@ -1452,6 +1546,17 @@ async function resetGeneratedAudio(config) {
   await resetFactLog(config);
 }
 
+async function trackFunnel(config, entry) {
+  try {
+    await recordFunnelEvent(config, entry);
+  } catch (error) {
+    await writeSystemLog(config, "funnel_event_failed", {
+      event: entry?.event || "unknown",
+      error: error.message,
+    }).catch(() => {});
+  }
+}
+
 function requiresAdmin(pathname) {
   return isAdminPagePath(pathname)
     || pathname === "/admin.js"
@@ -1466,6 +1571,12 @@ function requiresAdmin(pathname) {
 
 function isAdminPagePath(pathname) {
   return pathname === "/admin.html" || pathname === "/simsim";
+}
+
+function requiresCsrf(pathname, method) {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(String(method || "").toUpperCase())) return false;
+  if (pathname === "/api/admin/login" || pathname === "/api/admin/logout") return false;
+  return requiresAdmin(pathname);
 }
 
 function isAdminAuthorized(request, config) {

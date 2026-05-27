@@ -186,6 +186,20 @@ CREATE TABLE IF NOT EXISTS bot_star_transactions (
   notified_at TIMESTAMPTZ
 );
 
+CREATE TABLE IF NOT EXISTS funnel_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event TEXT NOT NULL,
+  actor_type TEXT NOT NULL DEFAULT 'listener' CHECK (actor_type IN ('listener', 'admin', 'bot', 'channel', 'system')),
+  telegram_id BIGINT,
+  username TEXT,
+  question_id TEXT,
+  source TEXT,
+  amount INTEGER,
+  currency TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_payment_orders_user_status ON payment_orders (telegram_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_listener_questions_status_priority ON listener_questions (status, priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_ready ON broadcast_jobs (status, scheduled_at, priority);
@@ -198,6 +212,8 @@ CREATE INDEX IF NOT EXISTS idx_broadcast_air_items_status ON broadcast_air_items
 CREATE INDEX IF NOT EXISTS idx_channel_posts_message ON channel_posts (channel_id, message_id);
 CREATE INDEX IF NOT EXISTS idx_channel_paid_reaction_events_created ON channel_paid_reaction_events (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_bot_star_transactions_recorded ON bot_star_transactions (recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_funnel_events_event_created ON funnel_events (event, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_funnel_events_telegram_created ON funnel_events (telegram_id, created_at DESC);
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$

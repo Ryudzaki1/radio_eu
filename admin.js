@@ -47,6 +47,10 @@ const clearArchiveButton = document.querySelector("#clearArchiveButton");
 const refreshListenersButton = document.querySelector("#refreshListenersButton");
 const resetListenersButton = document.querySelector("#resetListenersButton");
 const listenerList = document.querySelector("#listenerList");
+const refreshIncomeButton = document.querySelector("#refreshIncomeButton");
+const incomeSummary = document.querySelector("#incomeSummary");
+const incomeFunnel = document.querySelector("#incomeFunnel");
+const incomeRecent = document.querySelector("#incomeRecent");
 const queueGreetingButton = document.querySelector("#queueGreetingButton");
 const queueFactButton = document.querySelector("#queueFactButton");
 const queueFarewellButton = document.querySelector("#queueFarewellButton");
@@ -86,12 +90,15 @@ let factLog = { facts: [] };
 let archiveItems = [];
 let audioFiles = { liveTracks: [], playTracks: [], voiceArchive: [], voiceArchivePage: {}, counts: {} };
 let listenerStore = { users: [], questions: [] };
+let revenueSummary = null;
 let topicCycle = { active: false };
 let selectedTopicIndex = 0;
 let adminVoiceQueue = Promise.resolve();
 let voiceMusicUnlocked = false;
 let voiceMusicSnapshot = "";
 let adminLogQueue = Promise.resolve();
+let csrfToken = "";
+let csrfReady = loadAdminSession();
 
 const adminUiStorage = {
   tab: "ai-radio.adminTab",
@@ -112,6 +119,7 @@ liveUploadInput?.addEventListener("change", () => uploadAudioFiles("live", liveU
 playUploadInput?.addEventListener("change", () => uploadAudioFiles("play", playUploadInput));
 refreshListenersButton?.addEventListener("click", refreshListeners);
 resetListenersButton?.addEventListener("click", resetListeners);
+refreshIncomeButton?.addEventListener("click", refreshIncome);
 stopBroadcastButton?.addEventListener("click", toggleBroadcastPower);
 queueGreetingButton?.addEventListener("click", () => enqueueBroadcastAction("/api/greeting", queueGreetingButton, "Приветствие"));
 queueFactButton?.addEventListener("click", () => enqueueBroadcastAction("/api/fact", queueFactButton, "Следующая тема"));
@@ -211,12 +219,33 @@ function logAdminAction(action, details = {}) {
   const payload = { action, ...details };
   adminLogQueue = adminLogQueue
     .catch(() => {})
-    .then(() => fetch("/api/admin/log", {
+    .then(() => adminFetch("/api/admin/log", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       keepalive: true,
       body: JSON.stringify(payload),
     }).catch(() => {}));
+}
+
+async function loadAdminSession() {
+  try {
+    const response = await fetch("/api/admin/session", { cache: "no-store" });
+    if (!response.ok) return;
+    const payload = await response.json();
+    csrfToken = payload.csrfToken || "";
+  } catch {
+    csrfToken = "";
+  }
+}
+
+async function adminFetch(url, options = {}) {
+  await csrfReady.catch(() => {});
+  const method = String(options.method || "GET").toUpperCase();
+  const headers = new Headers(options.headers || {});
+  if (method !== "GET" && method !== "HEAD" && csrfToken) {
+    headers.set("X-CSRF-Token", csrfToken);
+  }
+  return fetch(url, { ...options, headers });
 }
 
 function getActiveTab() {
@@ -268,21 +297,24 @@ function formatSliderValue(rangeInput, value) {
 
 async function loadConfig() {
   try {
-    const [configResponse, logResponse, audioResponse, listenerResponse] = await Promise.all([
+    const [configResponse, logResponse, audioResponse, listenerResponse, revenueResponse] = await Promise.all([
       fetch("/api/admin/config"),
       fetch("/api/admin/fact-log"),
       fetch("/api/admin/audio-files"),
       fetch("/api/admin/listeners"),
+      fetch("/api/admin/revenue"),
     ]);
     currentConfig = await configResponse.json();
     factLog = await logResponse.json();
     audioFiles = audioResponse.ok ? await audioResponse.json() : { liveTracks: [], playTracks: [], voiceArchive: [], voiceArchivePage: {}, counts: {} };
     archiveItems = audioFiles.voiceArchive || [];
     listenerStore = listenerResponse.ok ? await listenerResponse.json() : { users: [], questions: [] };
+    revenueSummary = revenueResponse.ok ? await revenueResponse.json() : null;
     renderConfig(currentConfig);
     renderAudioFiles();
     renderArchive();
     renderListeners();
+    renderIncome();
     await refreshAirHistory();
     await refreshTopicCycleStatus();
     connectAdminEvents();
@@ -655,7 +687,7 @@ function deleteSelectedTopic() {
 
 async function saveConfig() {
   setStatus("Сохраняю настройки");
-  const response = await fetch("/api/admin/config", {
+  const response = await adminFetch("/api/admin/config", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(collectConfig()),
@@ -803,7 +835,7 @@ async function refreshPrompts() {
   setStatus("Обновляю промпты");
 
   try {
-    const response = await fetch("/api/admin/prompts/refresh", {
+    const response = await adminFetch("/api/admin/prompts/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(collectConfig()),
@@ -874,7 +906,7 @@ async function enqueueBroadcastAction(url, button, label, body = undefined) {
 
   try {
     await saveConfig();
-    const response = await fetch(url, {
+    const response = await adminFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
@@ -936,7 +968,7 @@ async function startTopicCycle() {
   try {
     await saveConfig();
     const savedTopic = currentConfig?.topics?.[selectedTopicIndex];
-    const response = await fetch("/api/admin/topic-cycle/start", {
+    const response = await adminFetch("/api/admin/topic-cycle/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -982,7 +1014,7 @@ async function stopTopicCycle() {
   stopTopicCycleButton.disabled = true;
   setStatus("Останавливаю автоэфир тем");
   try {
-    const response = await fetch("/api/admin/topic-cycle/stop", { method: "POST" });
+    const response = await adminFetch("/api/admin/topic-cycle/stop", { method: "POST" });
     topicCycle = await response.json();
     if (!response.ok) throw new Error(topicCycle.error || "Не удалось остановить автоэфир");
     renderTopicCycleStatus();
@@ -1091,7 +1123,7 @@ async function testPaymentFlow() {
   testPaymentFlowButton.disabled = true;
   testOutput.textContent = "Проверяю внутреннюю цепочку оплаты вопроса...";
   try {
-    const response = await fetch("/api/admin/tests/payment-flow", { method: "POST" });
+    const response = await adminFetch("/api/admin/tests/payment-flow", { method: "POST" });
     const payload = await response.json();
     if (!response.ok || !payload.ok) throw new Error(payload.error || payload.database?.reason || "Тест не прошел");
     testOutput.textContent = [
@@ -1110,7 +1142,7 @@ async function testPaymentFlow() {
 async function runTest(url) {
   await saveConfig();
   setStatus("Генерирую тест");
-  const response = await fetch(url, { method: "POST" });
+  const response = await adminFetch(url, { method: "POST" });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error || "Аудио диктора не создано");
   const source = payload.source ? ` [${payload.source}]` : "";
@@ -1170,7 +1202,7 @@ async function uploadAudioFiles(kind, input) {
   try {
     const form = new FormData();
     files.forEach((file) => form.append("files", file, file.name));
-    const response = await fetch(`/api/admin/audio-files/upload?kind=${encodeURIComponent(kind)}`, {
+    const response = await adminFetch(`/api/admin/audio-files/upload?kind=${encodeURIComponent(kind)}`, {
       method: "POST",
       body: form,
     });
@@ -1192,7 +1224,7 @@ async function deleteMusicFile(kind, track) {
   if (!confirmed) return;
 
   try {
-    const response = await fetch(`/api/admin/audio-files?kind=${encodeURIComponent(kind)}&file=${encodeURIComponent(track.file)}`, {
+    const response = await adminFetch(`/api/admin/audio-files?kind=${encodeURIComponent(kind)}&file=${encodeURIComponent(track.file)}`, {
       method: "DELETE",
     });
     const payload = await response.json();
@@ -1208,7 +1240,7 @@ async function insertPlayTrackFromAudioFiles(track, button) {
   if (button) button.disabled = true;
   setStatus(`Ставлю Play-вставку: ${track.title || track.file}`);
   try {
-    const response = await fetch("/api/admin/music/insert", {
+    const response = await adminFetch("/api/admin/music/insert", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ file: track.file }),
@@ -1311,6 +1343,73 @@ function getAirHistoryMeta(item) {
     || "";
 }
 
+async function refreshIncome() {
+  if (refreshIncomeButton) refreshIncomeButton.disabled = true;
+  try {
+    const response = await fetch("/api/admin/revenue", { cache: "no-store" });
+    revenueSummary = response.ok ? await response.json() : null;
+    renderIncome();
+    setStatus(response.ok ? "Доходы обновлены" : "Не удалось обновить доходы");
+  } catch (error) {
+    setStatus(`Доходы: ошибка - ${error.message}`);
+  } finally {
+    if (refreshIncomeButton) refreshIncomeButton.disabled = false;
+  }
+}
+
+function renderIncome() {
+  if (!incomeSummary || !incomeFunnel || !incomeRecent) return;
+  const stars = revenueSummary?.stars || {};
+  const paidQuestions = stars.paidQuestions || {};
+  const channel = stars.channel || {};
+  const botTransactions = stars.botTransactions || {};
+  const questionStatuses = revenueSummary?.questionStatuses || [];
+
+  incomeSummary.innerHTML = "";
+  [
+    ["Платные вопросы", `${paidQuestions.amount || 0} Stars`, `${paidQuestions.paymentsCount || 0} оплат`],
+    ["Канал", `${channel.paidReactionDelta || 0} Stars`, `${channel.eventsCount || 0} событий, ${channel.postsCount || 0} постов`],
+    ["Бот", `${botTransactions.incomingAmount || 0} Stars`, `${botTransactions.transactionsCount || 0} транзакций`],
+    ["Вопросы в БД", String(questionStatuses.reduce((sum, row) => sum + Number(row.count || 0), 0)), "все статусы"],
+  ].forEach(([title, value, note]) => {
+    const card = document.createElement("article");
+    card.className = "income-card";
+    card.innerHTML = `<span></span><strong></strong><small></small>`;
+    card.querySelector("span").textContent = title;
+    card.querySelector("strong").textContent = value;
+    card.querySelector("small").textContent = note;
+    incomeSummary.append(card);
+  });
+
+  incomeFunnel.innerHTML = "";
+  const funnel = revenueSummary?.funnel7d || [];
+  if (!funnel.length) {
+    incomeFunnel.append(createCompactRow("Пока нет событий", "Воронка начнет заполняться после действий в Telegram"));
+  } else {
+    funnel.forEach((item) => incomeFunnel.append(createCompactRow(item.event, `${item.count} раз`)));
+  }
+
+  incomeRecent.innerHTML = "";
+  const recent = revenueSummary?.recentFunnel || [];
+  if (!recent.length) {
+    incomeRecent.append(createCompactRow("Пока нет событий", ""));
+  } else {
+    recent.forEach((item) => {
+      const amount = item.amount ? ` · ${item.amount} ${item.currency || ""}` : "";
+      incomeRecent.append(createCompactRow(item.event, `${formatDateTime(item.created_at)}${amount}`));
+    });
+  }
+}
+
+function createCompactRow(title, meta) {
+  const row = document.createElement("div");
+  row.className = "compact-row";
+  row.innerHTML = `<strong></strong><span></span>`;
+  row.querySelector("strong").textContent = title || "";
+  row.querySelector("span").textContent = meta || "";
+  return row;
+}
+
 async function toggleBroadcastPower() {
   const isStopped = stopBroadcastButton?.dataset.broadcastStopped === "true";
   const confirmed = window.confirm(isStopped
@@ -1322,7 +1421,7 @@ async function toggleBroadcastPower() {
   setStatus(isStopped ? "Восстанавливаю эфир" : "Останавливаю эфир");
   try {
     const endpoint = isStopped ? "/api/admin/broadcast/restore" : "/api/admin/broadcast/stop";
-    const response = await fetch(endpoint, { method: "POST" });
+    const response = await adminFetch(endpoint, { method: "POST" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || (isStopped ? "Не удалось восстановить эфир" : "Не удалось остановить эфир"));
     setBroadcastButtonStopped(!isStopped);
@@ -1352,7 +1451,7 @@ async function clearArchive() {
     setStatus("Очистка архива отменена");
     return;
   }
-  const response = await fetch("/api/admin/archive/clear", { method: "POST" });
+  const response = await adminFetch("/api/admin/archive/clear", { method: "POST" });
   if (!response.ok) {
     setStatus("Не удалось очистить архив");
     return;
@@ -1382,7 +1481,7 @@ async function resetListeners() {
   const confirmed = window.confirm("Сбросить всех Telegram-пользователей и вопросы? После этого первые 9 слушателей должны заново нажать /start.");
   if (!confirmed) return;
 
-  const response = await fetch("/api/admin/listeners/reset", { method: "POST" });
+  const response = await adminFetch("/api/admin/listeners/reset", { method: "POST" });
   const payload = await response.json();
   if (!response.ok) {
     setStatus(payload.error || "Не удалось сбросить Telegram-пользователей");
@@ -1481,7 +1580,7 @@ async function deleteArchiveItem(item) {
   const confirmed = window.confirm(`Удалить аудио из архива?\n\n${item.title}`);
   if (!confirmed) return;
 
-  const response = await fetch(`/api/admin/archive?path=${encodeURIComponent(item.relativePath)}`, {
+  const response = await adminFetch(`/api/admin/archive?path=${encodeURIComponent(item.relativePath)}`, {
     method: "DELETE",
   });
   const payload = await response.json();
@@ -1554,6 +1653,9 @@ function activateTab(name, options = {}) {
 
   if (nextName === "archive") {
     refreshArchive();
+  }
+  if (nextName === "income") {
+    refreshIncome();
   }
 }
 

@@ -31,6 +31,7 @@
           <button class="admin-tab" type="button" data-tab="voice">Голос/Музыка</button>
           <button class="admin-tab" type="button" data-tab="archive">Аудио Файлы</button>
           <button class="admin-tab" type="button" data-tab="listeners">Слушатели</button>
+          <button class="admin-tab" type="button" data-tab="income">Доходы</button>
           <button class="admin-tab" type="button" data-tab="tests">Тесты</button>
         </nav>
       </section>
@@ -359,6 +360,29 @@
           </div>
         </div>
         <div id="listenerList" class="listener-list"></div>
+      </section>
+
+      <section class="panel admin-panel" data-panel="income">
+        <div class="section-head">
+          <div>
+            <h2>Доходы и воронка</h2>
+            <p>Оплаченные вопросы, платные реакции канала и последние события Telegram Stars.</p>
+          </div>
+          <div class="inline-actions">
+            <button id="refreshIncomeButton" type="button">Обновить</button>
+          </div>
+        </div>
+        <div class="income-grid" id="incomeSummary"></div>
+        <div class="income-details">
+          <section>
+            <h3>Воронка за 7 дней</h3>
+            <div id="incomeFunnel" class="compact-list"></div>
+          </section>
+          <section>
+            <h3>Последние события</h3>
+            <div id="incomeRecent" class="compact-list"></div>
+          </section>
+        </div>
       </section>
 
       <section class="panel admin-panel" data-panel="tests">

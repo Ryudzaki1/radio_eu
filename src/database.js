@@ -248,6 +248,76 @@ async function getStarsSummary(config) {
   };
 }
 
+async function recordFunnelEvent(config, entry = {}) {
+  const client = getPool(config);
+  if (!client) return { ok: false, reason: "database_disabled" };
+
+  await client.query(
+    `INSERT INTO funnel_events (
+       event, actor_type, telegram_id, username, question_id, source, amount, currency, metadata
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+    [
+      String(entry.event || "unknown"),
+      normalizeFunnelActorType(entry.actorType),
+      normalizeBigIntString(entry.telegramId) || null,
+      entry.username || null,
+      entry.questionId || null,
+      entry.source || null,
+      Number.isFinite(Number(entry.amount)) ? Math.trunc(Number(entry.amount)) : null,
+      entry.currency || null,
+      JSON.stringify(entry.metadata || {}),
+    ],
+  );
+  return { ok: true };
+}
+
+async function getRevenueSummary(config) {
+  const client = getPool(config);
+  if (!client) return null;
+
+  const [stars, funnel, recentFunnel, unpaidQuestions, recentPayments] = await Promise.all([
+    getStarsSummary(config),
+    client.query(
+      `SELECT event, count(*)::int AS count
+       FROM funnel_events
+       WHERE created_at >= now() - interval '7 days'
+       GROUP BY event
+       ORDER BY count DESC, event ASC`,
+    ),
+    client.query(
+      `SELECT event, actor_type, telegram_id, username, question_id, source, amount, currency, created_at
+       FROM funnel_events
+       ORDER BY created_at DESC
+       LIMIT 25`,
+    ),
+    client.query(
+      `SELECT lq.status, coalesce(po.status, 'free') AS payment_status, count(*)::int AS count
+       FROM listener_questions lq
+       LEFT JOIN payment_orders po ON po.id = lq.order_id
+       GROUP BY lq.status, coalesce(po.status, 'free')
+       ORDER BY lq.status, coalesce(po.status, 'free')`,
+    ),
+    client.query(
+      `SELECT p.amount, p.currency, p.created_at, lq.external_question_id, lq.question_text
+       FROM payments p
+       JOIN payment_orders po ON po.id = p.order_id
+       LEFT JOIN listener_questions lq ON lq.order_id = po.id
+       WHERE p.provider = 'telegram_stars'
+       ORDER BY p.created_at DESC
+       LIMIT 10`,
+    ),
+  ]);
+
+  return {
+    stars,
+    funnel7d: funnel.rows.map((row) => ({ event: row.event, count: row.count })),
+    recentFunnel: recentFunnel.rows,
+    questionStatuses: unpaidQuestions.rows,
+    recentPayments: recentPayments.rows,
+  };
+}
+
 async function runPaymentDbSelfTest(config) {
   const client = getPool(config);
   if (!client) return { ok: false, reason: "database_disabled" };
@@ -920,6 +990,10 @@ function normalizeUsername(value) {
   return text.startsWith("@") ? text : `@${text}`;
 }
 
+function normalizeFunnelActorType(value) {
+  return ["listener", "admin", "bot", "channel", "system"].includes(value) ? value : "listener";
+}
+
 function shouldRecordSystemEvent(event) {
   const name = String(event || "");
   if (!name) return false;
@@ -937,7 +1011,9 @@ function finiteNumberOrNull(value) {
 
 module.exports = {
   getPaymentSummary,
+  getRevenueSummary,
   getStarsSummary,
+  recordFunnelEvent,
   recordBotStarTransaction,
   recordBroadcastEvent,
   recordChannelReactionCount,
