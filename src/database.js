@@ -197,6 +197,57 @@ async function getPaymentSummary(config) {
   };
 }
 
+async function getStarsSummary(config) {
+  const client = getPool(config);
+  if (!client) return null;
+
+  const [paidQuestions, channelReactions, botTransactions] = await Promise.all([
+    client.query(
+      `SELECT
+         count(*)::int AS payments_count,
+         coalesce(sum(amount), 0)::numeric(18, 6) AS amount
+       FROM payments
+       WHERE provider = 'telegram_stars'
+         AND currency = 'XTR'`,
+    ),
+    client.query(
+      `SELECT
+         count(*)::int AS events_count,
+         coalesce(sum(paid_reaction_delta), 0)::int AS paid_reaction_delta,
+         count(DISTINCT (channel_id::text || ':' || message_id::text))::int AS posts_count,
+         max(created_at) AS last_event_at
+       FROM channel_paid_reaction_events`,
+    ),
+    client.query(
+      `SELECT
+         count(*)::int AS transactions_count,
+         coalesce(sum(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0)::int AS incoming_amount,
+         coalesce(sum(CASE WHEN amount < 0 THEN abs(amount) ELSE 0 END), 0)::int AS outgoing_amount,
+         max(recorded_at) AS last_recorded_at
+       FROM bot_star_transactions`,
+    ),
+  ]);
+
+  return {
+    paidQuestions: {
+      paymentsCount: paidQuestions.rows[0]?.payments_count || 0,
+      amount: Number(paidQuestions.rows[0]?.amount) || 0,
+    },
+    channel: {
+      eventsCount: channelReactions.rows[0]?.events_count || 0,
+      paidReactionDelta: channelReactions.rows[0]?.paid_reaction_delta || 0,
+      postsCount: channelReactions.rows[0]?.posts_count || 0,
+      lastEventAt: channelReactions.rows[0]?.last_event_at || null,
+    },
+    botTransactions: {
+      transactionsCount: botTransactions.rows[0]?.transactions_count || 0,
+      incomingAmount: botTransactions.rows[0]?.incoming_amount || 0,
+      outgoingAmount: botTransactions.rows[0]?.outgoing_amount || 0,
+      lastRecordedAt: botTransactions.rows[0]?.last_recorded_at || null,
+    },
+  };
+}
+
 async function runPaymentDbSelfTest(config) {
   const client = getPool(config);
   if (!client) return { ok: false, reason: "database_disabled" };
@@ -886,6 +937,7 @@ function finiteNumberOrNull(value) {
 
 module.exports = {
   getPaymentSummary,
+  getStarsSummary,
   recordBotStarTransaction,
   recordBroadcastEvent,
   recordChannelReactionCount,

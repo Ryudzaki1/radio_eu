@@ -36,7 +36,7 @@ const adminPanelLabels = {
   question: "Задать вопрос",
   radio: "Ссылка на эфир",
   tokens: "Остаток токенов",
-  stars: "Баланс Stars",
+  stars: "Отчет Stars",
 };
 const userPanelLabels = {
   question: "Задать вопрос",
@@ -147,7 +147,7 @@ async function handleMessage(message) {
   }
 
   if (isAdmin && isAdminPanelText(text, adminPanelLabels.stars)) {
-    await sendStarBalanceReport(chatId);
+    await sendStarBalanceReportV2(chatId);
     return;
   }
 
@@ -165,7 +165,7 @@ async function handleMessage(message) {
       await sendAccessDenied(chatId);
       return;
     }
-    await sendStarBalanceReport(chatId);
+    await sendStarBalanceReportV2(chatId);
     return;
   }
 
@@ -362,7 +362,7 @@ async function handleCallbackQuery(query) {
 
   if (data === "admin:stars") {
     await answerCallbackQuery(query.id, "Проверяю Stars.");
-    await sendStarBalanceReport(chatId);
+    await sendStarBalanceReportV2(chatId);
     return;
   }
 
@@ -573,6 +573,28 @@ async function sendStarBalanceReport(chatId) {
   }
 }
 
+async function sendStarBalanceReportV2(chatId) {
+  let botBalance = null;
+  let botBalanceError = "";
+  let summary = null;
+  let summaryError = "";
+
+  try {
+    const payload = await telegram("getMyStarBalance", {});
+    botBalance = payload.result?.amount ?? 0;
+  } catch (error) {
+    botBalanceError = error.message;
+  }
+
+  try {
+    summary = await radioGet("/api/listeners/stars/summary");
+  } catch (error) {
+    summaryError = error.message;
+  }
+
+  await send(chatId, formatStarsReport({ botBalance, botBalanceError, summary, summaryError }), buildAdminPanelReplyMarkup());
+}
+
 async function notifyAdminsAboutPaidQuestion(message, question) {
   const recipients = await getAdminNotificationChatIds();
   const payer = getProfileName(message.from);
@@ -719,7 +741,7 @@ async function setupBotInterface() {
         { command: "question", description: "Задать вопрос Sweetie Fox" },
         { command: "radio", description: "Получить ссылку на эфир" },
         { command: "tokens", description: "Остаток генерации текста и аудио" },
-        { command: "stars", description: "Баланс Stars бота" },
+        { command: "stars", description: "Отчет Stars: бот и канал" },
       ],
     });
   }
@@ -1262,6 +1284,30 @@ function formatAiUsageReport(usage, warnings = getAiUsageWarnings(usage)) {
     lines.push("", "Предупреждения:", ...warnings.map((item) => `- ${item}`));
   }
   lines.push("", `Проверено: ${formatDateTime(usage.checkedAt)}`);
+  return lines.join("\n");
+}
+
+function formatStarsReport({ botBalance, botBalanceError, summary, summaryError }) {
+  const paidQuestions = summary?.paidQuestions || {};
+  const channel = summary?.channel || {};
+  const botTransactions = summary?.botTransactions || {};
+  const lines = [
+    "Отчет Stars:",
+    "",
+    botBalanceError
+      ? `Баланс бота в Telegram: ошибка (${botBalanceError}).`
+      : `Баланс бота в Telegram: ${formatInteger(botBalance)} Stars.`,
+    `Оплаченные вопросы: ${formatInteger(paidQuestions.amount)} Stars, платежей: ${formatInteger(paidQuestions.paymentsCount)}.`,
+    `Транзакции бота: входящие ${formatInteger(botTransactions.incomingAmount)} Stars, исходящие ${formatInteger(botTransactions.outgoingAmount)} Stars, записей: ${formatInteger(botTransactions.transactionsCount)}.`,
+    "",
+    `Канал: ${formatInteger(channel.paidReactionDelta)} paid reactions / Stars-счетчик, событий: ${formatInteger(channel.eventsCount)}, постов: ${formatInteger(channel.postsCount)}.`,
+  ];
+  if (channel.lastEventAt) lines.push(`Последняя платная реакция канала: ${formatDateTime(channel.lastEventAt)}.`);
+  if (botTransactions.lastRecordedAt) lines.push(`Последняя транзакция бота в БД: ${formatDateTime(botTransactions.lastRecordedAt)}.`);
+  if (summaryError || summary?.reason) {
+    lines.push("", `БД-отчет: ошибка (${summaryError || summary.reason}).`);
+  }
+  lines.push("", "Канал считается по paid reaction counter от Telegram. Если Telegram не отдает точную сумму реакции, это минимальный paid-счетчик по постам.");
   return lines.join("\n");
 }
 

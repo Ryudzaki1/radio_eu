@@ -28,6 +28,7 @@ const { getAudioType, listTracks, resolveInside } = require("./music");
 const { readRecentSystemLogs, writeSystemLog } = require("./systemLog");
 const {
   getPaymentSummary,
+  getStarsSummary,
   recordBotStarTransaction,
   recordChannelReactionCount,
   runPaymentDbSelfTest,
@@ -524,6 +525,12 @@ function createServer(config) {
       if (request.method === "POST" && url.pathname === "/api/listeners/stars/transaction") {
         const result = await recordBotStarTransaction(config, await readJson(request));
         await sendJson(response, result.ok ? 200 : 409, result);
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/listeners/stars/summary") {
+        const summary = await getStarsSummary(config);
+        await sendJson(response, summary ? 200 : 503, summary || { ok: false, reason: "database_disabled" });
         return;
       }
 
