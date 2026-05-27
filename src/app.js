@@ -26,7 +26,12 @@ const {
 } = require("./listenerStore");
 const { getAudioType, listTracks, resolveInside } = require("./music");
 const { readRecentSystemLogs, writeSystemLog } = require("./systemLog");
-const { getPaymentSummary, runPaymentDbSelfTest } = require("./database");
+const {
+  getPaymentSummary,
+  recordBotStarTransaction,
+  recordChannelReactionCount,
+  runPaymentDbSelfTest,
+} = require("./database");
 
 const publicFiles = new Set(["/", "/index.html", "/styles.css", "/script.js", "/admin-login.html", "/admin.html", "/admin.js"]);
 const staticTypes = new Map([
@@ -506,6 +511,18 @@ function createServer(config) {
         });
         if (result.ok && !result.alreadyPaid) enqueueListenerQuestion(config, broadcast, result.question);
         await emitAdmin(config, "listeners", await readListenerStore(config));
+        await sendJson(response, result.ok ? 200 : 409, result);
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/listeners/channel/reaction") {
+        const result = await recordChannelReactionCount(config, await readJson(request));
+        await sendJson(response, result.ok ? 200 : 409, result);
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/listeners/stars/transaction") {
+        const result = await recordBotStarTransaction(config, await readJson(request));
         await sendJson(response, result.ok ? 200 : 409, result);
         return;
       }

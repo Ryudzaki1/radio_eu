@@ -22,6 +22,7 @@ const publicUrlHealthIntervalMs = clampNumber(process.env.PUBLIC_URL_HEALTH_INTE
 const publicServerIp = String(process.env.PUBLIC_SERVER_IP || process.env.RU_PUBLIC_IP || "").trim();
 const listenerStorePath = process.env.LISTENER_STORE_PATH || "/cache/config/listeners.json";
 const questionPriceStars = clampNumber(process.env.LISTENER_QUESTION_PRICE_STARS, 1, 100_000, 50);
+const starTransactionPollIntervalMs = clampNumber(process.env.STAR_TRANSACTION_POLL_INTERVAL_MS, 60_000, 24 * 60 * 60_000, 5 * 60_000);
 const deepseekConfig = {
   apiKey: process.env.DEEPSEEK_API_KEY || "",
   url: process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions",
@@ -56,6 +57,7 @@ const clearedReplyKeyboardChatIds = new Set();
 scheduleRadioLinkNotification();
 schedulePublicUrlHealthCheck();
 scheduleAiUsageNotification();
+scheduleStarTransactionSync();
 setupBotInterface().catch((error) => console.error(`bot interface error: ${error.message}`));
 
 poll().catch((error) => {
@@ -69,13 +71,14 @@ async function poll() {
       const updates = await telegram("getUpdates", {
         offset,
         timeout: 25,
-        allowed_updates: ["message", "callback_query", "pre_checkout_query"],
+        allowed_updates: ["message", "callback_query", "pre_checkout_query", "message_reaction_count"],
       });
 
       for (const update of updates.result || []) {
         if (update.message) await handleMessage(update.message);
         if (update.callback_query) await handleCallbackQuery(update.callback_query);
         if (update.pre_checkout_query) await handlePreCheckoutQuery(update.pre_checkout_query);
+        if (update.message_reaction_count) await handleMessageReactionCount(update.message_reaction_count);
         offset = update.update_id + 1;
       }
     } catch (error) {
@@ -425,6 +428,27 @@ async function handleSuccessfulPayment(message) {
   await sendUserMenu(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
 }
 
+async function handleMessageReactionCount(update) {
+  try {
+    const result = await radio("/api/listeners/channel/reaction", {
+      chat: update.chat,
+      messageId: update.message_id,
+      date: update.date,
+      reactions: update.reactions,
+      rawPayload: update,
+    });
+    if (!result.ok) {
+      console.error(`channel reaction record failed: ${JSON.stringify(result)}`);
+      return;
+    }
+    if (Number(result.paidDelta) > 0) {
+      await notifyAdminsAboutPaidReaction(result);
+    }
+  } catch (error) {
+    console.error(`message reaction count error: ${error.message}`);
+  }
+}
+
 async function sendStartIntro(chatId, publicUrl) {
   pendingUserNameChatIds.add(String(chatId));
   await sendRadioLink(chatId, [
@@ -559,6 +583,24 @@ async function notifyAdminsAboutPaidQuestion(message, question) {
       `Сумма: ${question.priceStars || questionPriceStars} Stars`,
       `Вопрос: ${question.question}`,
     ].join("\n"), buildAdminPanelReplyMarkup()).catch(() => {});
+  }
+}
+
+async function notifyAdminsAboutPaidReaction(result) {
+  const recipients = await getAdminNotificationChatIds();
+  const channel = result.channelUsername || result.channelId || "channel";
+  const messageLink = buildChannelPostLink(result.channelUsername, result.messageId);
+  const lines = [
+    "Новая платная реакция в канале.",
+    `Канал: ${channel}`,
+    `Пост: ${result.messageId}`,
+    `Прирост: +${result.paidDelta} paid reaction / Stars-счетчик`,
+    `Всего на посте: ${result.paidTotal}`,
+  ];
+  if (messageLink) lines.push(`Ссылка: ${messageLink}`);
+
+  for (const chatId of recipients) {
+    await send(chatId, lines.join("\n"), buildAdminPanelReplyMarkup()).catch(() => {});
   }
 }
 
@@ -812,6 +854,13 @@ function isWebAppUrl(value) {
   }
 }
 
+function buildChannelPostLink(channelUsername, messageId) {
+  const username = String(channelUsername || "").replace(/^@/, "").trim();
+  const id = String(messageId || "").trim();
+  if (!username || !id) return "";
+  return `https://t.me/${username}/${id}`;
+}
+
 function normalizeBaseUrl(value) {
   return String(value || "").replace(/\/+$/, "");
 }
@@ -1011,6 +1060,34 @@ async function notifyAdmins(text) {
   const recipients = await getAdminNotificationChatIds();
   for (const chatId of recipients) {
     await send(chatId, text);
+  }
+}
+
+function scheduleStarTransactionSync(attempt = 1) {
+  syncStarTransactions().then(() => {
+    setTimeout(() => scheduleStarTransactionSync(1), starTransactionPollIntervalMs);
+  }).catch((error) => {
+    console.error(`star transaction sync error: ${error.message}`);
+    const nextAttempt = attempt + 1;
+    setTimeout(() => scheduleStarTransactionSync(nextAttempt), Math.min(60_000, 5_000 * nextAttempt));
+  });
+}
+
+async function syncStarTransactions() {
+  let payload;
+  try {
+    payload = await telegram("getStarTransactions", { offset: 0, limit: 100 });
+  } catch (error) {
+    console.error(`getStarTransactions error: ${error.message}`);
+    return;
+  }
+
+  const transactions = payload.result?.transactions || [];
+  for (const transaction of transactions) {
+    const result = await radio("/api/listeners/stars/transaction", transaction);
+    if (!result.ok) {
+      console.error(`star transaction record failed: ${JSON.stringify(result)}`);
+    }
   }
 }
 

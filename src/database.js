@@ -269,6 +269,156 @@ async function runPaymentDbSelfTest(config) {
   }
 }
 
+async function recordChannelReactionCount(config, payload = {}) {
+  const client = getPool(config);
+  if (!client) return { ok: false, reason: "database_disabled" };
+
+  return withTransaction(client, async (tx) => {
+    const chat = payload.chat || {};
+    const channelId = normalizeBigIntString(chat.id || payload.channelId);
+    const messageId = normalizeBigIntString(payload.messageId || payload.message_id);
+    if (!channelId || !messageId) return { ok: false, reason: "missing_message" };
+
+    const eventAt = telegramDateToDate(payload.date) || new Date();
+    const reactions = Array.isArray(payload.reactions) ? payload.reactions : [];
+    const channelUsername = normalizeUsername(chat.username || payload.channelUsername);
+
+    await tx.query(
+      `INSERT INTO channel_posts (
+         channel_id, channel_username, message_id, title, message_text, posted_at, metadata
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       ON CONFLICT (channel_id, message_id) DO UPDATE
+       SET channel_username = coalesce(EXCLUDED.channel_username, channel_posts.channel_username),
+           title = coalesce(EXCLUDED.title, channel_posts.title),
+           message_text = coalesce(EXCLUDED.message_text, channel_posts.message_text),
+           metadata = channel_posts.metadata || EXCLUDED.metadata`,
+      [
+        channelId,
+        channelUsername,
+        messageId,
+        payload.title || null,
+        payload.messageText || payload.text || null,
+        payload.postedAt ? new Date(payload.postedAt) : null,
+        JSON.stringify({ rawChat: chat }),
+      ],
+    );
+
+    const recorded = [];
+    let paidDelta = 0;
+    let paidTotal = 0;
+
+    for (const item of reactions) {
+      const normalized = normalizeReactionCount(item);
+      const previous = await tx.query(
+        `SELECT total_count
+         FROM channel_post_reactions
+         WHERE channel_id = $1
+           AND message_id = $2
+           AND reaction_type = $3
+           AND reaction_key = $4
+         LIMIT 1`,
+        [channelId, messageId, normalized.reactionType, normalized.reactionKey],
+      );
+      const previousCount = Number(previous.rows[0]?.total_count) || 0;
+      const delta = normalized.totalCount - previousCount;
+
+      await tx.query(
+        `INSERT INTO channel_post_reactions (
+           channel_id, message_id, reaction_type, reaction_key,
+           total_count, previous_count, last_delta, last_update_at, metadata
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+         ON CONFLICT (channel_id, message_id, reaction_type, reaction_key) DO UPDATE
+         SET previous_count = channel_post_reactions.total_count,
+             total_count = EXCLUDED.total_count,
+             last_delta = EXCLUDED.total_count - channel_post_reactions.total_count,
+             last_update_at = EXCLUDED.last_update_at,
+             metadata = channel_post_reactions.metadata || EXCLUDED.metadata`,
+        [
+          channelId,
+          messageId,
+          normalized.reactionType,
+          normalized.reactionKey,
+          normalized.totalCount,
+          previousCount,
+          delta,
+          eventAt,
+          JSON.stringify({ rawReaction: item }),
+        ],
+      );
+
+      if (normalized.reactionType === "paid") {
+        paidTotal = normalized.totalCount;
+        if (delta > 0) {
+          paidDelta += delta;
+          await tx.query(
+            `INSERT INTO channel_paid_reaction_events (
+               channel_id, channel_username, message_id,
+               paid_reaction_delta, paid_reaction_total, event_at, metadata
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+            [
+              channelId,
+              channelUsername,
+              messageId,
+              delta,
+              normalized.totalCount,
+              eventAt,
+              JSON.stringify({ rawPayload: payload.rawPayload || payload }),
+            ],
+          );
+        }
+      }
+
+      recorded.push({ ...normalized, previousCount, delta });
+    }
+
+    return {
+      ok: true,
+      channelId,
+      channelUsername,
+      messageId,
+      paidDelta,
+      paidTotal,
+      reactions: recorded,
+    };
+  });
+}
+
+async function recordBotStarTransaction(config, transaction = {}) {
+  const client = getPool(config);
+  if (!client) return { ok: false, reason: "database_disabled" };
+
+  const normalized = normalizeBotStarTransaction(transaction);
+  if (!normalized.transactionId) return { ok: false, reason: "missing_transaction_id" };
+
+  const result = await client.query(
+    `INSERT INTO bot_star_transactions (
+       transaction_id, amount, nanostar_amount, direction, source_type, receiver_type,
+       transaction_at, raw_payload
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+     ON CONFLICT (transaction_id) DO NOTHING`,
+    [
+      normalized.transactionId,
+      normalized.amount,
+      normalized.nanostarAmount,
+      normalized.direction,
+      normalized.sourceType,
+      normalized.receiverType,
+      normalized.transactionAt,
+      JSON.stringify(transaction),
+    ],
+  );
+
+  return {
+    ok: true,
+    inserted: result.rowCount > 0,
+    ...normalized,
+  };
+}
+
 async function withTransaction(client, task) {
   const tx = await client.connect();
   try {
@@ -663,6 +813,62 @@ function normalizeActorType(value) {
   return ["system", "admin", "listener", "bot"].includes(value) ? value : "system";
 }
 
+function normalizeReactionCount(item = {}) {
+  const type = item.type || {};
+  const rawType = String(type.type || item.reaction_type || "unknown");
+  const totalCount = Math.max(0, Math.floor(Number(item.total_count ?? item.totalCount) || 0));
+  if (rawType === "paid") {
+    return { reactionType: "paid", reactionKey: "paid", totalCount };
+  }
+  if (rawType === "emoji") {
+    return { reactionType: "emoji", reactionKey: String(type.emoji || item.emoji || "emoji"), totalCount };
+  }
+  if (rawType === "custom_emoji") {
+    return {
+      reactionType: "custom_emoji",
+      reactionKey: String(type.custom_emoji_id || item.custom_emoji_id || "custom_emoji"),
+      totalCount,
+    };
+  }
+  return { reactionType: "unknown", reactionKey: rawType || "unknown", totalCount };
+}
+
+function normalizeBotStarTransaction(transaction = {}) {
+  const transactionId = String(transaction.id || transaction.transaction_id || "").trim();
+  const amount = Math.trunc(Number(transaction.amount) || 0);
+  const nanostarAmount = Number.isFinite(Number(transaction.nanostar_amount))
+    ? Math.trunc(Number(transaction.nanostar_amount))
+    : null;
+  const sourceType = transaction.source?.type || null;
+  const receiverType = transaction.receiver?.type || null;
+  return {
+    transactionId,
+    amount,
+    nanostarAmount,
+    direction: sourceType ? "incoming" : receiverType ? "outgoing" : "unknown",
+    sourceType,
+    receiverType,
+    transactionAt: telegramDateToDate(transaction.date),
+  };
+}
+
+function telegramDateToDate(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return null;
+  return new Date(number * 1000);
+}
+
+function normalizeBigIntString(value) {
+  const text = String(value ?? "").trim();
+  return /^-?\d+$/.test(text) ? text : "";
+}
+
+function normalizeUsername(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  return text.startsWith("@") ? text : `@${text}`;
+}
+
 function shouldRecordSystemEvent(event) {
   const name = String(event || "");
   if (!name) return false;
@@ -680,7 +886,9 @@ function finiteNumberOrNull(value) {
 
 module.exports = {
   getPaymentSummary,
+  recordBotStarTransaction,
   recordBroadcastEvent,
+  recordChannelReactionCount,
   recordSystemEvent,
   runPaymentDbSelfTest,
   syncListenerQuestionCreated,

@@ -25,6 +25,12 @@ proper migration command later.
 - `payment_orders` - payable orders before and after Telegram Stars, TON, or
   USDT confirmation.
 - `payments` - immutable payment confirmations from the provider.
+- `bot_star_transactions` - raw Telegram `getStarTransactions` rows for bot
+  Stars accounting.
+- `channel_posts` - channel posts seen through Telegram reaction updates.
+- `channel_post_reactions` - latest reaction counters for each channel post.
+- `channel_paid_reaction_events` - readable income events when the paid
+  reaction counter grows.
 - `listener_questions` - paid or free listener questions and their lifecycle.
 - `audio_assets` - generated mp3 files and their metadata.
 - `broadcast_jobs` - future durable queue for voice, music, topic, and listener
@@ -66,6 +72,19 @@ the runtime JSON store:
 - `payments.provider_charge_id` stores Telegram's successful payment charge id.
 - `payments(provider, provider_charge_id)` has a full unique index so repeated
   Telegram payment updates remain idempotent and work with `ON CONFLICT`.
+
+Telegram Stars have two tracked income sources:
+
+- Bot invoices for paid questions are stored in `payment_orders`, `payments`,
+  and `listener_questions`.
+- Channel paid reactions are stored separately in `channel_paid_reaction_events`
+  and summarized in `channel_post_reactions`. Telegram exposes these through
+  `message_reaction_count`, so the row stores the observed paid reaction counter
+  delta and total for a post.
+
+Bot-level Star transactions from `getStarTransactions` are copied into
+`bot_star_transactions` for reconciliation. They are not used to enqueue
+questions; successful payments still drive that flow.
 
 Useful query:
 

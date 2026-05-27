@@ -193,6 +193,13 @@ LISTENER_QUESTION_PRICE_STARS=50
 RADIO_INTERNAL_URL=http://10.77.0.2:18082
 ```
 
+Доходы Stars разделены на два источника:
+
+- `payments` / `payment_orders` - оплаченные вопросы через бота;
+- `channel_paid_reaction_events` и `channel_post_reactions` - платные реакции Stars под постами канала.
+
+EU-бот запрашивает у Telegram обновления `message_reaction_count`, записывает изменения счетчика paid reactions в RU Postgres и отправляет админу уведомление, если paid-счетчик поста вырос. Дополнительно бот периодически сверяет `getStarTransactions` и сохраняет транзакции бота в `bot_star_transactions`.
+
 Сейчас Stars используются для платных вопросов диктору. Отдельного сценария
 `донат без вопроса` пока нет: для него нужно добавить отдельную команду/кнопку,
 invoice payload вида `donate:<id>` и запись доната в Postgres отдельно от
