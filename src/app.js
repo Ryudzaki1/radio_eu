@@ -62,7 +62,11 @@ function createServer(config) {
 
   return http.createServer(async (request, response) => {
     try {
-      const url = new URL(request.url, `http://${request.headers.host}`);
+      const url = parseRequestUrl(request);
+      if (!url) {
+        await sendJson(response, 400, { error: "Bad request URL" });
+        return;
+      }
 
       if (request.method === "POST" && url.pathname === "/api/admin/login") {
         await handleAdminLogin(request, response, config);
@@ -580,6 +584,14 @@ function createServer(config) {
       }
     }
   });
+}
+
+function parseRequestUrl(request) {
+  try {
+    return new URL(request.url || "/", "http://localhost");
+  } catch {
+    return null;
+  }
 }
 
 function enqueueListenerQuestion(config, broadcast, question) {

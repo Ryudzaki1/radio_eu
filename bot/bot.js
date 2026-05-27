@@ -282,7 +282,17 @@ async function handleMessage(message) {
       "Бесплатный вопрос уже использован.",
       `Чтобы отправить этот вопрос в эфир, оплати ${accepted.question.priceStars} Stars.`,
     ].join("\n"));
-    await sendQuestionInvoice(chatId, accepted.question);
+    try {
+      await sendQuestionInvoice(chatId, accepted.question);
+    } catch (error) {
+      console.error(`question invoice failed: ${error.message}`);
+      await send(chatId, "Не удалось выставить счет Stars. Вопрос пока не поставлен в эфир, попробуй позже или напиши администратору.");
+      if (isAdmin) {
+        await sendAdminPanel(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
+      } else {
+        await sendUserMenu(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
+      }
+    }
     return;
   }
 
@@ -393,6 +403,16 @@ async function handleSuccessfulPayment(message) {
   });
   if (!result.ok) {
     await send(chatId, "Оплата получена, но вопрос уже не удалось поставить в очередь автоматически. Напиши администратору.");
+    return;
+  }
+
+  if (result.alreadyPaid) {
+    await sendRadioLink(chatId, [
+      "Эта оплата уже была обработана.",
+      "Вопрос уже находится в очереди эфира или был поставлен туда раньше.",
+      "Открой эфир и слушай Sweetie Fox.",
+    ].join("\n"), await getPublicRadioUrl());
+    await sendUserMenu(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
     return;
   }
 
