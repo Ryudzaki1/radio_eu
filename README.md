@@ -76,6 +76,19 @@ docker compose -f docker-compose.eu-bot.yml up -d --build
 radio-eu
 ```
 
+EU-бот имеет Docker healthcheck: контейнер считается здоровым только если
+доступны Telegram `getMe` и внутренний RU API `/api/tracks`.
+
+## Скрипты
+
+`scripts/smoke-tests.js` - быстрая проверка проекта.
+
+`scripts/ops/` - актуальные операционные скрипты для текущей RU/EU схемы.
+
+`scripts/legacy/` - исторические одноразовые setup/fix/diagnostic скрипты. Их
+нельзя запускать на продакшене без предварительного просмотра конкретного файла
+и цели запуска.
+
 ## Публичные Ссылки
 
 ```text

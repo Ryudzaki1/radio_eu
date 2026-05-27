@@ -25,7 +25,11 @@ services:
       - eu-bot-cache:/cache
     command: ["node", "bot/bot.js"]
     healthcheck:
-      disable: true
+      test: ["CMD", "node", "bot/healthcheck.js"]
+      interval: 2m
+      timeout: 15s
+      retries: 3
+      start_period: 30s
 
 volumes:
   eu-bot-cache:
