@@ -9,4 +9,5 @@ const server = createServer(config);
     console.log(`AI Chill Radio: http://localhost:${config.port}`);
     console.log(`Live music folder: ${config.liveMusicDir}`);
     console.log(`Play music folder: ${config.playMusicDir}`);
+    console.log(`Music rotation source: ${config.musicRotationSource} (${config.activeMusicVibe})`);
   });

@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { readAdminConfig } = require("./adminStore");
 const { listTracks, resolveInside } = require("./music");
+const { getMusicRoleDir, getMusicUrlPrefix, ROLE_FOLDERS } = require("./musicCatalog");
 const { writeSystemLog } = require("./systemLog");
 
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac"]);
@@ -323,7 +324,7 @@ class BroadcastStream {
   async syncMusicFiles() {
     this.durationCache.clear();
     const [liveTracks, playTracks] = await Promise.all([
-      listTracks(this.config.liveMusicDir, { urlPrefix: "/music/live" }),
+      this.readTracks(),
       listTracks(this.config.playMusicDir, { urlPrefix: "/music/play" }),
     ]);
     const playFiles = new Set(playTracks.map((track) => track.file));
@@ -341,10 +342,12 @@ class BroadcastStream {
     const result = {
       liveTracks,
       playTracks,
+      liveSource: liveTracks.sourceKind || "legacy",
       removedQueued: beforeQueue - this.musicQueue.length,
     };
     this.log("music_synced", {
       liveTracks: liveTracks.length,
+      liveSource: result.liveSource,
       playTracks: playTracks.length,
       removedQueued: result.removedQueued,
     });
@@ -614,16 +617,48 @@ class BroadcastStream {
 
   async readTracks() {
     try {
-      return await listTracks(this.config.liveMusicDir, { urlPrefix: "/music/live" });
+      return await this.readLiveTrackSource();
     } catch {
       return [];
     }
   }
 
+  async readLiveTrackSource() {
+    if (this.config.musicRotationSource === "catalog") {
+      const vibe = this.config.activeMusicVibe || "chill";
+      const dir = getMusicRoleDir(this.config, vibe, "live");
+      const tracks = await listTracks(dir, {
+        urlPrefix: getMusicUrlPrefix(vibe, "live"),
+        filePrefix: `${vibe}/${ROLE_FOLDERS.live}`,
+      }).catch(() => []);
+      if (tracks.length || !this.config.musicCatalogFallbackToLegacy) {
+        return this.attachLiveTrackSource(tracks, { dir, kind: "catalog", vibe, role: "live" });
+      }
+    }
+
+    const tracks = await listTracks(this.config.liveMusicDir, { urlPrefix: "/music/live" }).catch(() => []);
+    return this.attachLiveTrackSource(tracks, { dir: this.config.liveMusicDir, kind: "legacy", vibe: "", role: "live" });
+  }
+
+  attachLiveTrackSource(tracks, source) {
+    Object.defineProperties(tracks, {
+      sourceDir: { value: source.dir, enumerable: false },
+      sourceKind: { value: source.kind, enumerable: false },
+      sourceVibe: { value: source.vibe || "", enumerable: false },
+      sourceRole: { value: source.role || "live", enumerable: false },
+    });
+    return tracks;
+  }
+
+  resolveLiveTrackPath(tracks, track) {
+    const dir = tracks?.sourceDir || this.config.liveMusicDir;
+    return resolveInside(dir, track.fileName || path.basename(track.file || ""));
+  }
+
   async streamMusicSegment(tracks) {
     const normalMusic = await this.readNormalMusicGain();
     const track = tracks[this.currentTrackIndex];
-    const musicPath = resolveInside(this.config.liveMusicDir, track.file);
+    const musicPath = this.resolveLiveTrackPath(tracks, track);
     const segmentStartOffset = Math.max(0, this.currentTrackOffset);
     const trackDuration = await this.probeDuration(musicPath);
     if (segmentStartOffset >= trackDuration - 0.05) {
@@ -655,12 +690,14 @@ class BroadcastStream {
       kind: "live",
       file: track.file,
       title: track.title,
+      source: tracks.sourceKind || "legacy",
       durationSeconds: trackDuration,
       positionSeconds: segmentStartOffset,
     });
     this.log("live_music_start", {
       file: track.file,
       title: track.title,
+      source: tracks.sourceKind || "legacy",
       durationSeconds: trackDuration,
       positionSeconds: segmentStartOffset,
       trackIndex: this.currentTrackIndex,
@@ -909,7 +946,7 @@ class BroadcastStream {
 
     while (remaining > 0.05 && guard < tracks.length * 20) {
       const track = tracks[trackIndex];
-      const trackPath = resolveInside(this.config.liveMusicDir, track.file);
+      const trackPath = this.resolveLiveTrackPath(tracks, track);
       const trackDuration = await this.probeDuration(trackPath);
 
       if (offset >= trackDuration - 0.05) {
@@ -925,6 +962,7 @@ class BroadcastStream {
         path: trackPath,
         file: track.file,
         title: track.title,
+        source: tracks.sourceKind || "legacy",
         start: offset,
         duration,
         trackDuration,
@@ -938,12 +976,13 @@ class BroadcastStream {
 
     if (!segments.length) {
       const track = tracks[this.currentTrackIndex % tracks.length];
-      const trackPath = resolveInside(this.config.liveMusicDir, track.file);
+      const trackPath = this.resolveLiveTrackPath(tracks, track);
       segments.push({
         trackIndex: this.currentTrackIndex % tracks.length,
         path: trackPath,
         file: track.file,
         title: track.title,
+        source: tracks.sourceKind || "legacy",
         start: 0,
         duration: seconds,
         trackDuration: seconds,
@@ -960,7 +999,7 @@ class BroadcastStream {
 
     while (guard < tracks.length * 2) {
       const track = tracks[trackIndex];
-      const filePath = resolveInside(this.config.liveMusicDir, track.file);
+      const filePath = this.resolveLiveTrackPath(tracks, track);
       const duration = await this.probeDuration(filePath);
       if (trackOffset < duration - 0.05) {
         return {
@@ -977,7 +1016,7 @@ class BroadcastStream {
     }
 
     const track = tracks[trackIndex];
-    const filePath = resolveInside(this.config.liveMusicDir, track.file);
+    const filePath = this.resolveLiveTrackPath(tracks, track);
     return {
       index: trackIndex,
       offset: 0,
@@ -993,7 +1032,7 @@ class BroadcastStream {
 
     for (let guard = 0; guard < tracks.length * 4; guard += 1) {
       const track = tracks[trackIndex % tracks.length];
-      const filePath = resolveInside(this.config.liveMusicDir, track.file);
+      const filePath = this.resolveLiveTrackPath(tracks, track);
       const duration = await this.probeDuration(filePath);
       if (offset < duration - 0.05) {
         return {
@@ -1166,6 +1205,7 @@ class BroadcastStream {
       kind: item.kind || "music",
       file: item.file || "",
       title: item.title || "Music",
+      source: item.source || "",
       durationSeconds: Number.isFinite(item.durationSeconds) ? Math.max(0, item.durationSeconds) : 0,
       positionSeconds: Number.isFinite(item.positionSeconds) ? Math.max(0, item.positionSeconds) : 0,
       startedAt: Date.now(),
@@ -1183,6 +1223,7 @@ class BroadcastStream {
       segments: segments.map((segment) => ({
         file: segment.file || "",
         title: segment.title || "Live music",
+        source: segment.source || "",
         durationSeconds: Number.isFinite(segment.trackDuration) ? Math.max(0, segment.trackDuration) : 0,
         positionSeconds: Number.isFinite(segment.start) ? Math.max(0, segment.start) : 0,
         segmentDuration: Number.isFinite(segment.duration) ? Math.max(0, segment.duration) : 0,
@@ -1212,6 +1253,7 @@ class BroadcastStream {
         : activeSegment.positionSeconds + segmentElapsed;
       return {
         kind: this.currentMusic.kind,
+        source: activeSegment.source,
         file: activeSegment.file,
         title: activeSegment.title,
         durationSeconds: duration,
@@ -1227,6 +1269,7 @@ class BroadcastStream {
       : this.currentMusic.positionSeconds + elapsed;
     return {
       kind: this.currentMusic.kind,
+      source: this.currentMusic.source,
       file: this.currentMusic.file,
       title: this.currentMusic.title,
       durationSeconds: duration,

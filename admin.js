@@ -42,6 +42,7 @@ const audioCatalogLiveList = document.querySelector("#audioCatalogLiveList");
 const audioCatalogPlayList = document.querySelector("#audioCatalogPlayList");
 const audioCatalogJingleList = document.querySelector("#audioCatalogJingleList");
 const audioCatalogTransitionList = document.querySelector("#audioCatalogTransitionList");
+const liveRotationStatus = document.querySelector("#liveRotationStatus");
 const liveUploadInput = document.querySelector("#liveUploadInput");
 const playUploadInput = document.querySelector("#playUploadInput");
 const catalogLiveUploadInput = document.querySelector("#catalogLiveUploadInput");
@@ -579,6 +580,7 @@ function renderArchive() {
 }
 
 function renderAudioFiles() {
+  renderLiveRotationStatus();
   renderMusicFileList(
     audioCatalogLiveList,
     getCatalogRoleTracks("live"),
@@ -619,6 +621,17 @@ function renderAudioFiles() {
     "play",
     "Музыка для ручных Play-вставок пока не загружена.",
   );
+}
+
+function renderLiveRotationStatus() {
+  if (!liveRotationStatus) return;
+  const rotation = audioFiles.liveRotation || {};
+  const activeCount = audioFiles.activeLiveTracks?.length || 0;
+  if (rotation.source === "catalog") {
+    liveRotationStatus.textContent = `Сейчас эфир берет live-ротацию из BAA Vibe ${rotation.vibe || "chill"}: ${activeCount} файл(ов).`;
+    return;
+  }
+  liveRotationStatus.textContent = `Сейчас эфир работает через старую live-папку: ${activeCount} файл(ов). Новая BAA Vibe-папка подключится автоматически, когда в ней появится музыка.`;
 }
 
 function getActiveMusicVibe() {

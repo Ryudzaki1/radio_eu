@@ -168,9 +168,10 @@ function createServer(config) {
       }
 
       if (request.method === "GET" && url.pathname === "/api/tracks") {
+        const activeLiveTracks = await broadcast.readTracks();
         const liveTracks = await addTrackDurations(
-          await listTracks(config.liveMusicDir, { urlPrefix: "/music/live" }),
-          config.liveMusicDir,
+          activeLiveTracks,
+          activeLiveTracks.sourceDir || config.liveMusicDir,
           broadcast,
         );
         const playTracks = await addTrackDurations(
@@ -178,7 +179,12 @@ function createServer(config) {
           config.playMusicDir,
           broadcast,
         );
-        await sendJson(response, 200, { tracks: liveTracks, liveTracks, playTracks });
+        await sendJson(response, 200, {
+          tracks: liveTracks,
+          liveTracks,
+          playTracks,
+          liveSource: activeLiveTracks.sourceKind || "legacy",
+        });
         return;
       }
 
@@ -1801,7 +1807,7 @@ async function listArchiveItems(config) {
 async function getAudioFilesPayload(config, broadcast, options = {}) {
   const voiceOffset = clampArchiveOffset(options.voiceOffset);
   const voiceLimit = clampArchiveLimit(options.voiceLimit);
-  const [liveTracks, playTracks, musicCatalog, voiceArchivePage] = await Promise.all([
+  const [liveTracks, playTracks, musicCatalog, activeLiveTracksRaw, voiceArchivePage] = await Promise.all([
     addTrackDurations(
       await listTracks(config.liveMusicDir, { urlPrefix: "/music/live" }),
       config.liveMusicDir,
@@ -1813,12 +1819,24 @@ async function getAudioFilesPayload(config, broadcast, options = {}) {
       broadcast,
     ),
     getMusicCatalogPayload(config, broadcast),
+    broadcast.readTracks(),
     listArchiveItemsPage(config, { offset: voiceOffset, limit: voiceLimit }),
   ]);
+  const activeLiveTracks = await addTrackDurations(
+    activeLiveTracksRaw,
+    activeLiveTracksRaw.sourceDir || config.liveMusicDir,
+    broadcast,
+  );
 
   return {
     liveTracks,
     playTracks,
+    activeLiveTracks,
+    liveRotation: {
+      source: activeLiveTracksRaw.sourceKind || "legacy",
+      vibe: activeLiveTracksRaw.sourceVibe || config.activeMusicVibe,
+      fallbackToLegacy: config.musicCatalogFallbackToLegacy,
+    },
     musicCatalog,
     voiceArchive: voiceArchivePage.items,
     voiceArchivePage: {
@@ -2370,7 +2388,7 @@ function labelKind(kind) {
 async function addTrackDurations(tracks, musicDir, broadcast) {
   return Promise.all(tracks.map(async (track) => {
     try {
-      const filePath = resolveInside(musicDir, track.file);
+      const filePath = resolveInside(musicDir, track.fileName || track.file);
       const durationSeconds = await broadcast.probeDuration(filePath);
       return { ...track, durationSeconds };
     } catch {

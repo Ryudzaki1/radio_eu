@@ -912,6 +912,12 @@ input[type="range"] {
   line-height: 1.35;
 }
 
+.section-head.compact .mini-status {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .track,
 .topic-pill,
 .archive-item,

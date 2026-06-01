@@ -12,6 +12,8 @@ const config = {
   liveMusicDir: resolveConfigDir(process.env.LIVE_MUSIC_DIR, path.join(process.env.MUSIC_DIR || path.join(rootDir, "music"), "live")),
   playMusicDir: resolveConfigDir(process.env.PLAY_MUSIC_DIR, path.join(process.env.MUSIC_DIR || path.join(rootDir, "music"), "play")),
   activeMusicVibe: normalizeSlug(process.env.ACTIVE_MUSIC_VIBE || "chill"),
+  musicRotationSource: normalizeMusicRotationSource(process.env.MUSIC_ROTATION_SOURCE || "catalog"),
+  musicCatalogFallbackToLegacy: process.env.MUSIC_CATALOG_FALLBACK_TO_LEGACY !== "false",
   cacheDir: resolveConfigDir(process.env.CACHE_DIR, path.join(rootDir, ".cache", "announcements")),
   archiveDir: resolveConfigDir(process.env.ARCHIVE_DIR, path.join(rootDir, ".cache", "archive")),
   logDir: resolveConfigDir(process.env.LOG_DIR, path.join(rootDir, ".cache", "logs")),
@@ -122,6 +124,11 @@ function normalizeSlug(value) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
   return normalized || "chill";
+}
+
+function normalizeMusicRotationSource(value) {
+  const source = String(value || "").trim().toLowerCase();
+  return source === "legacy" ? "legacy" : "catalog";
 }
 
 module.exports = { config, ensureRuntimeDirs };
