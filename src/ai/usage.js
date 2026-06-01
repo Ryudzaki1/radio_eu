@@ -114,4 +114,4 @@ function normalizeBaseUrl(value) {
   return String(value || "").replace(/\/+$/, "");
 }
 
-module.exports = { getAiUsage };
+module.exports = { getAiUsage, getDeepSeekUsage, getElevenLabsUsage };

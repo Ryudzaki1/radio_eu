@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { generateFact, generateFarewell, generateGreeting, generateListenerAnswer } = require("./deepseek");
 const { synthesize } = require("./elevenlabs");
+const { getElevenLabsUsage } = require("./usage");
 const { getActivePromptSet, readAdminConfig } = require("../adminStore");
 const {
   addFactLogEntry,
@@ -27,10 +28,26 @@ async function createGreeting(config, input = {}) {
       "pool",
     );
   }
-  const text = await generateGreeting(config.deepseek, admin).catch((error) => {
+  let text = null;
+  let textError = null;
+  try {
+    text = await generateGreeting(config.deepseek, admin);
+  } catch (error) {
     console.warn(`DeepSeek greeting fallback: ${error.message}`);
-    return "Добро пожаловать на AI Chill Radio. Проверяем голос диктора и запускаем локальный эфир.";
-  });
+    textError = error.message;
+  }
+  if (!text) {
+    if (pool.anyRevision.length) {
+      return toReusableVoicePayload(
+        pickReusableVoiceAsset(pool.currentRevision.length ? pool.currentRevision : pool.anyRevision),
+        "greeting",
+        "hello",
+        "fallback",
+        textError,
+      );
+    }
+    return toFailedVoicePayload("greeting", "hello", `DeepSeek greeting failed: ${textError || "no text"}`);
+  }
 
   const payload = await createArchivedVoice(config, {
     kind: "greeting",
@@ -61,10 +78,26 @@ async function createFarewell(config, input = {}) {
       "pool",
     );
   }
-  const text = await generateFarewell(config.deepseek, admin).catch((error) => {
+  let text = null;
+  let textError = null;
+  try {
+    text = await generateFarewell(config.deepseek, admin);
+  } catch (error) {
     console.warn(`DeepSeek farewell fallback: ${error.message}`);
-    return "Спасибо, что были на волне AI Chill Radio. До встречи в следующем спокойном эфире.";
-  });
+    textError = error.message;
+  }
+  if (!text) {
+    if (pool.anyRevision.length) {
+      return toReusableVoicePayload(
+        pickReusableVoiceAsset(pool.currentRevision.length ? pool.currentRevision : pool.anyRevision),
+        "farewell",
+        "bye",
+        "fallback",
+        textError,
+      );
+    }
+    return toFailedVoicePayload("farewell", "bye", `DeepSeek farewell failed: ${textError || "no text"}`);
+  }
 
   const payload = await createArchivedVoice(config, {
     kind: "farewell",
@@ -154,10 +187,30 @@ async function createFactUnlocked(config, input = {}) {
 
   const recentFacts = getRecentFacts(log, topicName, subtopicName, 8);
 
-  const text = await generateFact(config.deepseek, topicName, subtopicName, admin, recentFacts, selection).catch((error) => {
+  const voiceCapacity = await ensureVoiceGenerationAvailable(config.elevenlabs);
+  if (!voiceCapacity.ok) {
+    return toFailedVoicePayload("facts", topicName, voiceCapacity.reason, {
+      topic: topicName,
+      topicIndex: selection.topicIndex,
+      subtopic: subtopicName,
+      subtopicIndex: selection.subtopicIndex,
+      source: "generation-failed",
+    });
+  }
+
+  let text = null;
+  try {
+    text = await generateFact(config.deepseek, topicName, subtopicName, admin, recentFacts, selection);
+  } catch (error) {
     console.warn(`DeepSeek fact fallback: ${error.message}`);
-    return `Факт на тему ${topicName}, ${subtopicName}: иногда самые спокойные наблюдения оказываются самыми запоминающимися.`;
-  });
+    return toFailedVoicePayload("facts", topicName, `DeepSeek fact failed: ${error.message}`, {
+      topic: topicName,
+      topicIndex: selection.topicIndex,
+      subtopic: subtopicName,
+      subtopicIndex: selection.subtopicIndex,
+      source: "generation-failed",
+    });
+  }
 
   const payload = await createArchivedVoice(config, {
     kind: "facts",
@@ -181,10 +234,24 @@ async function createListenerQuestion(config, input) {
   const admin = await readAdminConfig(config);
   const userName = String(input.userName || "Слушатель").slice(0, 80);
   const question = String(input.question || "").slice(0, 1200);
-  const text = await generateListenerAnswer(config.deepseek, userName, question, admin).catch((error) => {
+  const voiceCapacity = await ensureVoiceGenerationAvailable(config.elevenlabs);
+  if (!voiceCapacity.ok) {
+    return toFailedVoicePayload("listeners", sanitizeSlug(userName) || "listener", voiceCapacity.reason, {
+      userName,
+      question,
+    });
+  }
+
+  let text = null;
+  try {
+    text = await generateListenerAnswer(config.deepseek, userName, question, admin);
+  } catch (error) {
     console.warn(`DeepSeek listener fallback: ${error.message}`);
-    return `${userName} прислал такой вопрос: ${question}. <break time=0.45s /> Давайте спокойно разберем его в эфире.`;
-  });
+    return toFailedVoicePayload("listeners", sanitizeSlug(userName) || "listener", `DeepSeek listener failed: ${error.message}`, {
+      userName,
+      question,
+    });
+  }
 
   return createArchivedVoice(config, {
     kind: "listeners",
@@ -199,13 +266,22 @@ async function createArchivedVoice(config, item) {
   const admin = await readAdminConfig(config);
   const promptSet = getActivePromptSet(admin);
   const archive = getArchivePaths(config, item);
-  const uniqueKind = `${item.kind}:${item.topic || item.theme}:${item.subtopic || ""}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  const stableKind = [
+    item.kind,
+    item.hostId || promptSet.hostId,
+    item.promptRevision ?? promptSet.revision,
+    item.topic || item.theme,
+    item.subtopic || "",
+    item.userName || "",
+    item.question || "",
+  ].join(":");
   let audio = null;
   let audioError = null;
 
   try {
     audio = await synthesize(config.elevenlabs, archive.dir, item.text, {
-      kind: uniqueKind,
+      kind: stableKind,
+      operation: item.kind,
       publicUrlPrefix: archive.publicUrlPrefix,
       voice: admin.voice,
     });
@@ -334,6 +410,41 @@ function toReusableVoicePayload(asset, kind, theme, source, audioError = null) {
     archived: true,
     source,
     audioError,
+  };
+}
+
+async function ensureVoiceGenerationAvailable(config) {
+  if (!config?.apiKey) return { ok: false, reason: "ElevenLabs API key is empty" };
+  if (!config?.voiceId) return { ok: false, reason: "ElevenLabs voice id is empty" };
+
+  const usage = await getElevenLabsUsage(config);
+  if (!usage.ok) return { ok: false, reason: `ElevenLabs usage check failed: ${usage.reason || "unknown error"}` };
+  if (Number.isFinite(usage.remaining) && usage.remaining < 400) {
+    return { ok: false, reason: `ElevenLabs remaining characters are too low: ${usage.remaining}` };
+  }
+  return { ok: true };
+}
+
+function toFailedVoicePayload(kind, theme, error, extra = {}) {
+  return {
+    text: null,
+    audioUrl: null,
+    archived: false,
+    archivePath: null,
+    theme,
+    topic: extra.topic || theme,
+    topicIndex: extra.topicIndex,
+    subtopic: extra.subtopic,
+    subtopicIndex: extra.subtopicIndex,
+    kind,
+    userName: extra.userName,
+    question: extra.question,
+    voiceId: extra.voiceId || null,
+    promptRevision: extra.promptRevision,
+    hostId: extra.hostId,
+    hostName: extra.hostName,
+    audioError: error,
+    source: extra.source || "generation-failed",
   };
 }
 

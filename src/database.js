@@ -89,6 +89,33 @@ async function recordBroadcastEvent(config, entry) {
   await recordAirItem(client, normalized);
 }
 
+async function recordAiUsageEvent(config, event = {}) {
+  const client = getPool(config);
+  if (!client) return;
+
+  const provider = String(event.provider || "").toLowerCase();
+  if (!["deepseek", "elevenlabs"].includes(provider)) return;
+
+  await client.query(
+    `INSERT INTO ai_usage_events (
+       provider, operation, related_question_id, related_audio_asset_id,
+       units, cost_estimate, currency, metadata, created_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      provider,
+      String(event.operation || "unknown").slice(0, 120),
+      event.relatedQuestionId || null,
+      event.relatedAudioAssetId || null,
+      finiteNumberOrNull(event.units),
+      finiteNumberOrNull(event.costEstimate),
+      event.currency ? String(event.currency).slice(0, 16) : null,
+      JSON.stringify(event.metadata || {}),
+      event.createdAt ? new Date(event.createdAt) : new Date(),
+    ],
+  );
+}
+
 async function syncListenerQuestionCreated(config, user, question) {
   const client = getPool(config);
   if (!client || !user || !question) return;
@@ -1013,6 +1040,7 @@ module.exports = {
   getPaymentSummary,
   getRevenueSummary,
   getStarsSummary,
+  recordAiUsageEvent,
   recordFunnelEvent,
   recordBotStarTransaction,
   recordBroadcastEvent,

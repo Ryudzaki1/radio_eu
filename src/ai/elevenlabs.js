@@ -2,6 +2,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { hash } = require("../music");
 const { fetchWithTimeout } = require("../http");
+const { config: appConfig } = require("../config");
+const { recordAiUsageEvent } = require("../database");
 
 let ttsQueue = Promise.resolve();
 
@@ -17,7 +19,9 @@ async function synthesizeUnlocked(config, outputDir, text, options = {}) {
 
   await fs.promises.mkdir(outputDir, { recursive: true });
 
-  const cacheKey = hash(`${config.voiceId}:${text}:${options.kind || "voice"}`);
+  const preparedText = prepareTextForSpeech(text);
+  const operation = String(options.operation || options.kind || "voice").slice(0, 120);
+  const cacheKey = hash(`${config.voiceId}:${preparedText}:${options.kind || "voice"}`);
   const fileName = `${cacheKey}.mp3`;
   const filePath = path.join(outputDir, fileName);
   const publicUrl = options.publicUrlPrefix ? `${options.publicUrlPrefix}/${fileName}` : `/cache/announcements/${fileName}`;
@@ -27,28 +31,69 @@ async function synthesizeUnlocked(config, outputDir, text, options = {}) {
   }
 
   const url = `${config.baseUrl}/v1/text-to-speech/${encodeURIComponent(config.voiceId)}?output_format=mp3_44100_128`;
-  const response = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: {
-      "xi-api-key": config.apiKey,
-      "Content-Type": "application/json",
-      "Accept": "audio/mpeg",
-    },
-    body: JSON.stringify({
-      text: prepareTextForSpeech(text),
-      model_id: options.voice?.model || config.model,
-      language_code: "ru",
-      voice_settings: getVoiceSettings(options.voice),
-    }),
-  }, 90_000);
+  const model = options.voice?.model || config.model;
+  const voiceSettings = getVoiceSettings(options.voice);
+  let response = null;
+  try {
+    response = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: {
+        "xi-api-key": config.apiKey,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text: preparedText,
+        model_id: model,
+        language_code: "ru",
+        voice_settings: voiceSettings,
+      }),
+    }, 90_000);
+  } catch (error) {
+    recordElevenLabsUsage(operation, {
+      status: "error",
+      textChars: preparedText.length,
+      model,
+      error: error.message,
+    }).catch(() => {});
+    throw error;
+  }
 
   if (!response.ok) {
-    throw new Error(`ElevenLabs ${response.status}: ${summarizeErrorBody(await response.text())}`);
+    const error = `ElevenLabs ${response.status}: ${summarizeErrorBody(await response.text())}`;
+    recordElevenLabsUsage(operation, {
+      status: "error",
+      textChars: preparedText.length,
+      model,
+      error,
+    }).catch(() => {});
+    throw new Error(error);
   }
 
   const bytes = Buffer.from(await response.arrayBuffer());
   await fs.promises.writeFile(filePath, bytes);
+  recordElevenLabsUsage(operation, {
+    status: "ok",
+    textChars: preparedText.length,
+    model,
+    bytes: bytes.length,
+  }).catch(() => {});
   return { audioUrl: publicUrl, fileName, filePath, fromCache: false };
+}
+
+async function recordElevenLabsUsage(operation, details = {}) {
+  await recordAiUsageEvent(appConfig, {
+    provider: "elevenlabs",
+    operation,
+    units: details.status === "ok" ? details.textChars : null,
+    metadata: {
+      status: details.status,
+      textChars: details.textChars,
+      model: details.model,
+      audioBytes: details.bytes,
+      error: details.error ? String(details.error).slice(0, 300) : undefined,
+    },
+  });
 }
 
 function getVoiceSettings(settings = {}) {

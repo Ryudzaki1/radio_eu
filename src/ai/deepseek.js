@@ -1,5 +1,7 @@
 const { fetchJson } = require("../http");
 const { getActivePromptSet } = require("../adminStore");
+const { config: appConfig } = require("../config");
+const { recordAiUsageEvent } = require("../database");
 
 async function generateGreeting(config, admin) {
   if (!config.apiKey) {
@@ -8,6 +10,7 @@ async function generateGreeting(config, admin) {
 
   const promptSet = getActivePromptSet(admin);
   const text = await chat(config, {
+    operation: "greeting",
     temperature: 0.95,
     maxTokens: 130,
     maxChars: 900,
@@ -25,6 +28,7 @@ async function generateFarewell(config, admin) {
 
   const promptSet = getActivePromptSet(admin);
   const text = await chat(config, {
+    operation: "farewell",
     temperature: 0.95,
     maxTokens: 120,
     maxChars: 900,
@@ -49,9 +53,10 @@ async function generateFact(config, topic, subtopic, admin, recentFacts = [], co
 
   const promptSet = getActivePromptSet(admin);
   const text = await chat(config, {
+    operation: "fact",
     temperature: 0.92,
-    maxTokens: 1200,
-    maxChars: 5200,
+    maxTokens: 700,
+    maxChars: 3600,
     system: "Ты редактор и диктор AI chill radio. Делай эфирный монолог на 30-40 секунд: подробно, понятно, без воды и без канцелярита. Каждый выпуск раскрывает одну подтему внутри главной темы. Нельзя повторять объект, пример, число или сюжет из списка запретов. Без списков, markdown, кавычек, эмодзи и технических пометок.",
     user: buildPrompt(admin, "fact", `Главная тема: ${topic}.\nПодтема: ${subtopic}.\nЭто обязательная подтема выпуска, не уходи в соседние подтемы.${topicIntro}${avoid}\nВыдай только готовый текст диктора для эфира.`),
     fallback: `Факт на тему ${topic}, ${subtopic}: иногда самые спокойные наблюдения оказываются самыми запоминающимися.`,
@@ -67,9 +72,10 @@ async function generateListenerAnswer(config, userName, question, admin) {
   const promptSet = getActivePromptSet(admin);
   const prompt = promptSet.listener || promptSet.fact;
   const text = await chat(config, {
+    operation: "listener_answer",
     temperature: 0.9,
-    maxTokens: 1200,
-    maxChars: 7000,
+    maxTokens: 850,
+    maxChars: 4600,
     system: `Ты диктор AI Chill Radio. Главная инструкция по стилю, длине, структуре и подаче находится в промпте администратора для ведущего ${promptSet.hostName}. Если промпт администратора задает количество предложений, строго соблюдай его. Не добавляй другую длину от себя. Без markdown, списков, кавычек и эмодзи.`,
     user: buildPrompt(admin, "listener", `Контекст эфира:\nСлушатель: ${userName}.\nВопрос слушателя: ${question}.\n\nСформируй ответ для живого эфира. Начни с обращения: ${userName} прислал такой вопрос. Затем коротко озвучь вопрос и ответь по сути. Если в промпте администратора разрешены паузы, используй <break time=0.35s /> или <break time=0.55s /> только там, где это естественно. Не превышай длину, указанную в промпте администратора.`),
     fallback: `${userName} прислал вопрос: ${question}. <break time=0.45s /> Интересный повод притормозить и посмотреть на тему внимательнее.`,
@@ -128,24 +134,69 @@ async function pingDeepSeek(config) {
 }
 
 async function chat(config, options) {
-  const payload = await fetchJson(config.url, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: config.model,
-      temperature: options.temperature,
-      max_tokens: options.maxTokens,
-      messages: [
-        { role: "system", content: options.system },
-        { role: "user", content: options.user },
-      ],
-    }),
-  });
+  const operation = options.operation || "chat";
+  let payload = null;
+  try {
+    payload = await fetchJson(config.url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.model,
+        temperature: options.temperature,
+        max_tokens: options.maxTokens,
+        messages: [
+          { role: "system", content: options.system },
+          { role: "user", content: options.user },
+        ],
+      }),
+    });
+  } catch (error) {
+    recordDeepSeekUsage(config, operation, {
+      status: "error",
+      error: error.message,
+      requestMaxTokens: options.maxTokens,
+    }).catch(() => {});
+    throw error;
+  }
 
-  return sanitizeAnnouncement(payload.choices?.[0]?.message?.content, options.maxChars) || options.fallback;
+  const rawText = payload.choices?.[0]?.message?.content || "";
+  const text = sanitizeAnnouncement(rawText, options.maxChars) || options.fallback;
+  recordDeepSeekUsage(config, operation, {
+    status: "ok",
+    usage: payload.usage,
+    model: payload.model || config.model,
+    requestMaxTokens: options.maxTokens,
+    outputChars: text.length,
+  }).catch(() => {});
+
+  return text;
+}
+
+async function recordDeepSeekUsage(config, operation, details = {}) {
+  const usage = details.usage || {};
+  await recordAiUsageEvent(appConfig, {
+    provider: "deepseek",
+    operation,
+    units: finiteNumber(usage.total_tokens),
+    metadata: {
+      status: details.status,
+      model: details.model || config.model,
+      promptTokens: finiteNumber(usage.prompt_tokens),
+      completionTokens: finiteNumber(usage.completion_tokens),
+      totalTokens: finiteNumber(usage.total_tokens),
+      requestMaxTokens: finiteNumber(details.requestMaxTokens),
+      outputChars: finiteNumber(details.outputChars),
+      error: details.error ? String(details.error).slice(0, 300) : undefined,
+    },
+  });
+}
+
+function finiteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function sanitizeAnnouncement(text, maxChars = 620) {
