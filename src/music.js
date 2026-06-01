@@ -13,15 +13,17 @@ const audioTypes = new Map([
 
 async function listTracks(musicDir, options = {}) {
   const urlPrefix = String(options.urlPrefix || "/music").replace(/\/+$/, "");
+  const filePrefix = String(options.filePrefix || "").replace(/^\/+|\/+$/g, "");
   const entries = await fs.promises.readdir(musicDir, { withFileTypes: true });
 
   return entries
     .filter((entry) => entry.isFile() && audioTypes.has(path.extname(entry.name).toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name, "ru", { numeric: true }))
     .map((entry) => ({
-      id: hash(entry.name).slice(0, 12),
+      id: hash(filePrefix ? `${filePrefix}/${entry.name}` : entry.name).slice(0, 12),
       title: prettifyTitle(entry.name),
-      file: entry.name,
+      file: filePrefix ? `${filePrefix}/${entry.name}` : entry.name,
+      fileName: entry.name,
       url: `${urlPrefix}/${encodeURIComponent(entry.name)}`,
     }));
 }

@@ -25,6 +25,12 @@ const {
   updateQuestion,
 } = require("./listenerStore");
 const { getAudioType, listTracks, resolveInside } = require("./music");
+const {
+  getMusicRoleDir,
+  listMusicCatalog,
+  normalizeMusicRole,
+  normalizeMusicVibe,
+} = require("./musicCatalog");
 const { readRecentSystemLogs, writeSystemLog } = require("./systemLog");
 const {
   buildAdminCsrfToken,
@@ -247,6 +253,11 @@ function createServer(config) {
         return;
       }
 
+      if (request.method === "GET" && url.pathname === "/api/admin/music/catalog") {
+        await sendJson(response, 200, await getMusicCatalogPayload(config, broadcast));
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/api/admin/listeners") {
         await sendJson(response, 200, await readListenerStore(config));
         return;
@@ -326,7 +337,11 @@ function createServer(config) {
       }
 
       if (request.method === "POST" && url.pathname === "/api/admin/audio-files/upload") {
-        const result = await uploadMusicFiles(config, request, url.searchParams.get("kind"));
+        const result = await uploadMusicFiles(config, request, {
+          kind: url.searchParams.get("kind"),
+          vibe: url.searchParams.get("vibe"),
+          role: url.searchParams.get("role"),
+        });
         const sync = await broadcast.syncMusicFiles();
         await writeSystemLog(config, "admin_audio_files_uploaded", {
           kind: result.kind,
@@ -339,7 +354,12 @@ function createServer(config) {
       }
 
       if (request.method === "DELETE" && url.pathname === "/api/admin/audio-files") {
-        const result = await deleteMusicFile(config, url.searchParams.get("kind"), url.searchParams.get("file"));
+        const result = await deleteMusicFile(config, {
+          kind: url.searchParams.get("kind"),
+          file: url.searchParams.get("file"),
+          vibe: url.searchParams.get("vibe"),
+          role: url.searchParams.get("role"),
+        });
         const sync = await broadcast.syncMusicFiles();
         await writeSystemLog(config, "admin_audio_file_deleted", result);
         await emitAdmin(config, "audio-files", await getAudioFilesPayload(config, broadcast));
@@ -1781,7 +1801,7 @@ async function listArchiveItems(config) {
 async function getAudioFilesPayload(config, broadcast, options = {}) {
   const voiceOffset = clampArchiveOffset(options.voiceOffset);
   const voiceLimit = clampArchiveLimit(options.voiceLimit);
-  const [liveTracks, playTracks, voiceArchivePage] = await Promise.all([
+  const [liveTracks, playTracks, musicCatalog, voiceArchivePage] = await Promise.all([
     addTrackDurations(
       await listTracks(config.liveMusicDir, { urlPrefix: "/music/live" }),
       config.liveMusicDir,
@@ -1792,12 +1812,14 @@ async function getAudioFilesPayload(config, broadcast, options = {}) {
       config.playMusicDir,
       broadcast,
     ),
+    getMusicCatalogPayload(config, broadcast),
     listArchiveItemsPage(config, { offset: voiceOffset, limit: voiceLimit }),
   ]);
 
   return {
     liveTracks,
     playTracks,
+    musicCatalog,
     voiceArchive: voiceArchivePage.items,
     voiceArchivePage: {
       offset: voiceArchivePage.offset,
@@ -1809,8 +1831,22 @@ async function getAudioFilesPayload(config, broadcast, options = {}) {
       live: liveTracks.length,
       play: playTracks.length,
       voice: voiceArchivePage.total,
+      catalog: musicCatalog?.vibes?.[0]?.counts || {},
     },
   };
+}
+
+async function getMusicCatalogPayload(config, broadcast) {
+  const catalog = await listMusicCatalog(config);
+  for (const vibe of catalog.vibes) {
+    for (const role of Object.keys(vibe.roles || {})) {
+      const data = vibe.roles[role];
+      data.tracks = await addTrackDurations(data.tracks, data.dir, broadcast);
+      data.count = data.tracks.length;
+    }
+    vibe.counts = Object.fromEntries(Object.entries(vibe.roles).map(([role, data]) => [role, data.count]));
+  }
+  return catalog;
 }
 
 async function listArchiveItemsPage(config, options = {}) {
@@ -1949,9 +1985,10 @@ async function deleteArchiveItem(config, relativePath) {
   await fs.promises.rm(filePath, { force: true });
 }
 
-async function uploadMusicFiles(config, request, requestedKind) {
-  const kind = normalizeMusicKind(requestedKind);
-  const targetDir = kind === "live" ? config.liveMusicDir : config.playMusicDir;
+async function uploadMusicFiles(config, request, target) {
+  const location = resolveMusicTarget(config, target);
+  const { kind, role, vibe, storage } = location;
+  const targetDir = location.dir;
   await fs.promises.mkdir(targetDir, { recursive: true });
   const saved = [];
   const skipped = [];
@@ -1980,6 +2017,7 @@ async function uploadMusicFiles(config, request, requestedKind) {
     await fs.promises.rename(file.tempPath, targetPath);
     saved.push({
       file: safeName,
+      catalogFile: storage === "catalog" ? `${vibe}/${location.folder}/${safeName}` : null,
       originalFile: file.fileName,
       bytes: file.bytes,
       durationSeconds: probe.durationSeconds,
@@ -1992,12 +2030,13 @@ async function uploadMusicFiles(config, request, requestedKind) {
     throw error;
   }
 
-  return { ok: true, kind, files: saved, skipped };
+  return { ok: true, kind, role, vibe, storage, files: saved, skipped };
 }
 
-async function deleteMusicFile(config, requestedKind, requestedFile) {
-  const kind = normalizeMusicKind(requestedKind);
-  const file = String(requestedFile || "").trim();
+async function deleteMusicFile(config, target) {
+  const location = resolveMusicTarget(config, target);
+  const { kind, role, vibe, storage } = location;
+  const file = String(target?.file || "").trim();
   if (!file) {
     const error = new Error("Audio file name is required");
     error.statusCode = 400;
@@ -2009,8 +2048,8 @@ async function deleteMusicFile(config, requestedKind, requestedFile) {
     throw error;
   }
 
-  const targetDir = kind === "live" ? config.liveMusicDir : config.playMusicDir;
-  if (kind === "live") {
+  const targetDir = location.dir;
+  if (storage === "legacy" && kind === "live") {
     const liveTracks = await listTracks(config.liveMusicDir, { urlPrefix: "/music/live" });
     if (liveTracks.length <= 1) {
       const error = new Error("At least one live music file must remain");
@@ -2018,9 +2057,10 @@ async function deleteMusicFile(config, requestedKind, requestedFile) {
       throw error;
     }
   }
-  const filePath = resolveInside(targetDir, file);
+  const fileName = storage === "catalog" ? path.basename(file) : file;
+  const filePath = resolveInside(targetDir, fileName);
   await fs.promises.rm(filePath, { force: false });
-  return { ok: true, kind, file };
+  return { ok: true, kind, role, vibe, storage, file: fileName };
 }
 
 function normalizeMusicKind(value) {
@@ -2029,6 +2069,37 @@ function normalizeMusicKind(value) {
   const error = new Error("Audio file kind must be live or play");
   error.statusCode = 400;
   throw error;
+}
+
+function resolveMusicTarget(config, target = {}) {
+  const hasCatalogTarget = Boolean(target.vibe || target.role);
+  if (hasCatalogTarget) {
+    const vibe = normalizeMusicVibe(target.vibe || config.activeMusicVibe);
+    const role = normalizeMusicRole(target.role || target.kind);
+    const folder = role === "jingle"
+      ? "jingles"
+      : role === "transition"
+        ? "transitions"
+        : role;
+    return {
+      storage: "catalog",
+      kind: role,
+      role,
+      vibe,
+      folder,
+      dir: getMusicRoleDir(config, vibe, role),
+    };
+  }
+
+  const kind = normalizeMusicKind(target.kind);
+  return {
+    storage: "legacy",
+    kind,
+    role: kind,
+    vibe: null,
+    folder: kind,
+    dir: kind === "live" ? config.liveMusicDir : config.playMusicDir,
+  };
 }
 
 function isSupportedAudioExtension(extension) {

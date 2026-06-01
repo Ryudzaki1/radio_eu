@@ -11,6 +11,7 @@ const config = {
   musicDir: resolveConfigDir(process.env.MUSIC_DIR, path.join(rootDir, "music")),
   liveMusicDir: resolveConfigDir(process.env.LIVE_MUSIC_DIR, path.join(process.env.MUSIC_DIR || path.join(rootDir, "music"), "live")),
   playMusicDir: resolveConfigDir(process.env.PLAY_MUSIC_DIR, path.join(process.env.MUSIC_DIR || path.join(rootDir, "music"), "play")),
+  activeMusicVibe: normalizeSlug(process.env.ACTIVE_MUSIC_VIBE || "chill"),
   cacheDir: resolveConfigDir(process.env.CACHE_DIR, path.join(rootDir, ".cache", "announcements")),
   archiveDir: resolveConfigDir(process.env.ARCHIVE_DIR, path.join(rootDir, ".cache", "archive")),
   logDir: resolveConfigDir(process.env.LOG_DIR, path.join(rootDir, ".cache", "logs")),
@@ -61,6 +62,9 @@ function ensureRuntimeDirs() {
   fs.mkdirSync(config.musicDir, { recursive: true });
   fs.mkdirSync(config.liveMusicDir, { recursive: true });
   fs.mkdirSync(config.playMusicDir, { recursive: true });
+  for (const folder of ["live", "play", "jingles", "transitions"]) {
+    fs.mkdirSync(path.join(config.musicDir, config.activeMusicVibe, folder), { recursive: true });
+  }
   fs.mkdirSync(config.cacheDir, { recursive: true });
   fs.mkdirSync(config.archiveDir, { recursive: true });
   fs.mkdirSync(config.logDir, { recursive: true });
@@ -108,6 +112,16 @@ function parseList(value) {
 function clampPositiveInteger(value, fallback) {
   const number = Math.floor(Number(value));
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function normalizeSlug(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return normalized || "chill";
 }
 
 module.exports = { config, ensureRuntimeDirs };
