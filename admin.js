@@ -38,8 +38,16 @@ const voiceArchiveSummary = document.querySelector("#voiceArchiveSummary");
 const loadMoreVoiceArchiveButton = document.querySelector("#loadMoreVoiceArchiveButton");
 const audioLiveList = document.querySelector("#audioLiveList");
 const audioPlayList = document.querySelector("#audioPlayList");
+const audioCatalogLiveList = document.querySelector("#audioCatalogLiveList");
+const audioCatalogPlayList = document.querySelector("#audioCatalogPlayList");
+const audioCatalogJingleList = document.querySelector("#audioCatalogJingleList");
+const audioCatalogTransitionList = document.querySelector("#audioCatalogTransitionList");
 const liveUploadInput = document.querySelector("#liveUploadInput");
 const playUploadInput = document.querySelector("#playUploadInput");
+const catalogLiveUploadInput = document.querySelector("#catalogLiveUploadInput");
+const catalogPlayUploadInput = document.querySelector("#catalogPlayUploadInput");
+const catalogJingleUploadInput = document.querySelector("#catalogJingleUploadInput");
+const catalogTransitionUploadInput = document.querySelector("#catalogTransitionUploadInput");
 const airHistory = document.querySelector("#airHistory");
 const stopBroadcastButton = document.querySelector("#stopBroadcastButton");
 const refreshArchiveButton = document.querySelector("#refreshArchiveButton");
@@ -88,7 +96,7 @@ const sliderValueInputs = {
 let currentConfig = null;
 let factLog = { facts: [] };
 let archiveItems = [];
-let audioFiles = { liveTracks: [], playTracks: [], voiceArchive: [], voiceArchivePage: {}, counts: {} };
+let audioFiles = { liveTracks: [], playTracks: [], voiceArchive: [], voiceArchivePage: {}, counts: {}, musicCatalog: null };
 let listenerStore = { users: [], questions: [] };
 let revenueSummary = null;
 let topicCycle = { active: false };
@@ -117,6 +125,10 @@ loadMoreVoiceArchiveButton?.addEventListener("click", loadMoreVoiceArchive);
 clearArchiveButton?.addEventListener("click", clearArchive);
 liveUploadInput?.addEventListener("change", () => uploadAudioFiles("live", liveUploadInput));
 playUploadInput?.addEventListener("change", () => uploadAudioFiles("play", playUploadInput));
+catalogLiveUploadInput?.addEventListener("change", () => uploadAudioFiles("live", catalogLiveUploadInput, { vibe: "chill", role: "live" }));
+catalogPlayUploadInput?.addEventListener("change", () => uploadAudioFiles("play", catalogPlayUploadInput, { vibe: "chill", role: "play" }));
+catalogJingleUploadInput?.addEventListener("change", () => uploadAudioFiles("jingle", catalogJingleUploadInput, { vibe: "chill", role: "jingle" }));
+catalogTransitionUploadInput?.addEventListener("change", () => uploadAudioFiles("transition", catalogTransitionUploadInput, { vibe: "chill", role: "transition" }));
 refreshListenersButton?.addEventListener("click", refreshListeners);
 resetListenersButton?.addEventListener("click", resetListeners);
 refreshIncomeButton?.addEventListener("click", refreshIncome);
@@ -568,6 +580,34 @@ function renderArchive() {
 
 function renderAudioFiles() {
   renderMusicFileList(
+    audioCatalogLiveList,
+    getCatalogRoleTracks("live"),
+    "live",
+    "В новой Live-библиотеке BAA Vibe Chill пока нет файлов.",
+    { vibe: "chill", role: "live", label: "Live эфир BAA Vibe", protectLastTrack: false },
+  );
+  renderMusicFileList(
+    audioCatalogPlayList,
+    getCatalogRoleTracks("play"),
+    "play",
+    "В новой Play-библиотеке пока нет файлов.",
+    { vibe: "chill", role: "play", label: "Play вставку BAA Vibe", canInsert: false, protectLastTrack: false },
+  );
+  renderMusicFileList(
+    audioCatalogJingleList,
+    getCatalogRoleTracks("jingle"),
+    "jingle",
+    "Jingles пока не загружены.",
+    { vibe: "chill", role: "jingle", label: "Jingle", protectLastTrack: false },
+  );
+  renderMusicFileList(
+    audioCatalogTransitionList,
+    getCatalogRoleTracks("transition"),
+    "transition",
+    "Transitions пока не загружены.",
+    { vibe: "chill", role: "transition", label: "Transition", protectLastTrack: false },
+  );
+  renderMusicFileList(
     audioLiveList,
     audioFiles.liveTracks || [],
     "live",
@@ -581,7 +621,15 @@ function renderAudioFiles() {
   );
 }
 
-function renderMusicFileList(container, tracks, kind, emptyText) {
+function getActiveMusicVibe() {
+  return audioFiles.musicCatalog?.vibes?.[0] || null;
+}
+
+function getCatalogRoleTracks(role) {
+  return getActiveMusicVibe()?.roles?.[role]?.tracks || [];
+}
+
+function renderMusicFileList(container, tracks, kind, emptyText, options = {}) {
   if (!container) return;
   container.innerHTML = "";
 
@@ -608,12 +656,13 @@ function renderMusicFileList(container, tracks, kind, emptyText) {
     row.querySelector(".audio-file-number").textContent = String(index + 1).padStart(2, "0");
     row.querySelector("strong").textContent = track.title || track.file;
     row.querySelector(".archive-meta span").textContent = [
-      track.file,
+      track.fileName || track.file,
       track.durationSeconds ? formatDuration(track.durationSeconds) : "",
     ].filter(Boolean).join(" · ");
     row.querySelector("audio").src = track.url;
     const actions = row.querySelector(".audio-file-actions");
-    if (kind === "play") {
+    const canInsert = options.canInsert ?? (kind === "play" && !options.vibe);
+    if (canInsert) {
       const playButton = document.createElement("button");
       playButton.className = "primary-action";
       playButton.type = "button";
@@ -625,11 +674,12 @@ function renderMusicFileList(container, tracks, kind, emptyText) {
     deleteButton.className = "danger-button";
     deleteButton.type = "button";
     deleteButton.textContent = "Удалить";
-    if (kind === "live" && tracks.length <= 1) {
+    const protectLastTrack = options.protectLastTrack ?? (kind === "live" && !options.vibe);
+    if (protectLastTrack && tracks.length <= 1) {
       deleteButton.disabled = true;
       deleteButton.title = "Нельзя удалить последний live-трек";
     } else {
-      deleteButton.addEventListener("click", () => deleteMusicFile(kind, track));
+      deleteButton.addEventListener("click", () => deleteMusicFile(kind, track, options));
     }
     actions.append(deleteButton);
     container.append(row);
@@ -1193,16 +1243,37 @@ async function loadMoreVoiceArchive() {
   }
 }
 
-async function uploadAudioFiles(kind, input) {
+function buildAudioFileParams(kind, options = {}) {
+  const params = new URLSearchParams();
+  if (options.vibe && options.role) {
+    params.set("vibe", options.vibe);
+    params.set("role", options.role);
+  } else {
+    params.set("kind", kind);
+  }
+  return params;
+}
+
+function getAudioFileLabel(kind, options = {}) {
+  if (options.label) return options.label;
+  if (options.role === "live") return "Live эфир BAA Vibe";
+  if (options.role === "play") return "Play вставку BAA Vibe";
+  if (options.role === "jingle") return "Jingle";
+  if (options.role === "transition") return "Transition";
+  return kind === "live" ? "музыку эфира" : "Play-вставки";
+}
+
+async function uploadAudioFiles(kind, input, options = {}) {
   const files = Array.from(input?.files || []);
   if (!files.length) return;
 
-  const label = kind === "live" ? "музыку эфира" : "Play-вставки";
+  const label = getAudioFileLabel(kind, options);
   setStatus(`Загружаю ${label}: ${files.length} файл(ов)`);
   try {
     const form = new FormData();
     files.forEach((file) => form.append("files", file, file.name));
-    const response = await adminFetch(`/api/admin/audio-files/upload?kind=${encodeURIComponent(kind)}`, {
+    const params = buildAudioFileParams(kind, options);
+    const response = await adminFetch(`/api/admin/audio-files/upload?${params.toString()}`, {
       method: "POST",
       body: form,
     });
@@ -1218,13 +1289,15 @@ async function uploadAudioFiles(kind, input) {
   }
 }
 
-async function deleteMusicFile(kind, track) {
-  const label = kind === "live" ? "музыку эфира" : "Play-вставку";
-  const confirmed = window.confirm(`Удалить ${label}?\n\n${track.file}`);
+async function deleteMusicFile(kind, track, options = {}) {
+  const label = getAudioFileLabel(kind, options);
+  const confirmed = window.confirm(`Удалить ${label}?\n\n${track.fileName || track.file}`);
   if (!confirmed) return;
 
   try {
-    const response = await adminFetch(`/api/admin/audio-files?kind=${encodeURIComponent(kind)}&file=${encodeURIComponent(track.file)}`, {
+    const params = buildAudioFileParams(kind, options);
+    params.set("file", track.file);
+    const response = await adminFetch(`/api/admin/audio-files?${params.toString()}`, {
       method: "DELETE",
     });
     const payload = await response.json();

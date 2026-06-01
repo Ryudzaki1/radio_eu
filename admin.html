@@ -304,11 +304,77 @@
           </div>
         </div>
         <div class="audio-files-layout">
+          <section class="audio-file-block audio-file-block-wide audio-library-block">
+            <div class="section-head compact">
+              <div>
+                <h2>BAA Vibe Chill Radio</h2>
+                <p>Новая библиотека нейромузыки. Live и Play уже разделены по ролям, Jingles и Transitions подготовлены для следующего этапа.</p>
+              </div>
+            </div>
+            <div class="audio-role-grid">
+              <section class="audio-role-panel">
+                <div class="section-head compact">
+                  <div>
+                    <h2>Live эфир</h2>
+                    <p>Основная chill-ротация для будущего эфира BAA Vibe.</p>
+                  </div>
+                  <label class="upload-action">
+                    <input id="catalogLiveUploadInput" type="file" accept="audio/*" multiple>
+                    <span>Загрузить</span>
+                  </label>
+                </div>
+                <div id="audioCatalogLiveList" class="audio-file-list compact-list" aria-live="polite"></div>
+              </section>
+
+              <section class="audio-role-panel">
+                <div class="section-head compact">
+                  <div>
+                    <h2>Play вставки</h2>
+                    <p>Музыка по заказу слушателей, позже будет генерироваться через API.</p>
+                  </div>
+                  <label class="upload-action">
+                    <input id="catalogPlayUploadInput" type="file" accept="audio/*" multiple>
+                    <span>Загрузить</span>
+                  </label>
+                </div>
+                <div id="audioCatalogPlayList" class="audio-file-list compact-list" aria-live="polite"></div>
+              </section>
+
+              <section class="audio-role-panel">
+                <div class="section-head compact">
+                  <div>
+                    <h2>Jingles</h2>
+                    <p>Короткие фирменные отбивки и иденты станции.</p>
+                  </div>
+                  <label class="upload-action">
+                    <input id="catalogJingleUploadInput" type="file" accept="audio/*" multiple>
+                    <span>Загрузить</span>
+                  </label>
+                </div>
+                <div id="audioCatalogJingleList" class="audio-file-list compact-list" aria-live="polite"></div>
+              </section>
+
+              <section class="audio-role-panel">
+                <div class="section-head compact">
+                  <div>
+                    <h2>Transitions</h2>
+                    <p>Переходы между блоками, темами и музыкальными сегментами.</p>
+                  </div>
+                  <label class="upload-action">
+                    <input id="catalogTransitionUploadInput" type="file" accept="audio/*" multiple>
+                    <span>Загрузить</span>
+                  </label>
+                </div>
+                <div id="audioCatalogTransitionList" class="audio-file-list compact-list" aria-live="polite"></div>
+              </section>
+            </div>
+          </section>
+
           <section class="audio-file-block">
             <div class="section-head compact">
               <div>
-                <h2>Музыка эфира</h2>
-                <p>Live эфир. Эти файлы играют автоматически по кругу.</p>
+                <h2>Текущий эфир сейчас</h2>
+                <p>Эти файлы уже подключены к текущей ротации и играют автоматически по кругу.</p>
               </div>
               <label class="upload-action">
                 <input id="liveUploadInput" type="file" accept="audio/*" multiple>
@@ -321,8 +387,8 @@
           <section class="audio-file-block">
             <div class="section-head compact">
               <div>
-                <h2>Музыка для вставки</h2>
-                <p>Play вставки. Эти файлы можно вручную поставить в эфир.</p>
+                <h2>Текущие Play вставки</h2>
+                <p>Эти файлы можно вручную поставить в эфир прямо сейчас.</p>
               </div>
               <label class="upload-action">
                 <input id="playUploadInput" type="file" accept="audio/*" multiple>
