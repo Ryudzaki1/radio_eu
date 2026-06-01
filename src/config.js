@@ -53,6 +53,7 @@ const config = {
     voiceId: process.env.ELEVENLABS_VOICE_ID || "",
     model: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
     baseUrl: process.env.ELEVENLABS_BASE_URL || "https://api.elevenlabs.io",
+    musicModel: process.env.ELEVENLABS_MUSIC_MODEL || "music_v2",
   },
 };
 
