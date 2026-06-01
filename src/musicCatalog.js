@@ -1,6 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { listTracks, resolveInside } = require("./music");
+const { listTracks } = require("./music");
 
 const DEFAULT_VIBE = "chill";
 const MUSIC_ROLES = ["live", "play", "jingle", "transition"];
@@ -56,10 +56,6 @@ function getMusicUrlPrefix(vibe, role) {
   return `/music/${encodeURIComponent(normalizeMusicVibe(vibe))}/${ROLE_FOLDERS[normalizeMusicRole(role)]}`;
 }
 
-function resolveMusicCatalogFile(config, vibe, role, file) {
-  return resolveInside(getMusicRoleDir(config, vibe, role), String(file || ""));
-}
-
 function normalizeMusicVibe(value) {
   const normalized = String(value || DEFAULT_VIBE)
     .toLowerCase()
@@ -91,5 +87,4 @@ module.exports = {
   listMusicCatalog,
   normalizeMusicRole,
   normalizeMusicVibe,
-  resolveMusicCatalogFile,
 };

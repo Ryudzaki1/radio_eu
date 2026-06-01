@@ -35,12 +35,6 @@ async function writeFactLog(config, log) {
   await fs.promises.writeFile(config.factLogPath, JSON.stringify(normalizeFactLog(log), null, 2), "utf8");
 }
 
-async function resetFactLog(config) {
-  const log = { cursor: { topicIndex: 0, subtopicIndex: 0 }, facts: [] };
-  await writeFactLog(config, log);
-  return log;
-}
-
 async function addFactLogEntry(config, entry) {
   const log = await readFactLog(config);
   log.facts.push({
@@ -223,6 +217,5 @@ module.exports = {
   getRecentFacts,
   readAvailableFactLog,
   readFactLog,
-  resetFactLog,
   setCursor,
 };

@@ -52,7 +52,6 @@ const catalogTransitionUploadInput = document.querySelector("#catalogTransitionU
 const airHistory = document.querySelector("#airHistory");
 const stopBroadcastButton = document.querySelector("#stopBroadcastButton");
 const refreshArchiveButton = document.querySelector("#refreshArchiveButton");
-const clearArchiveButton = document.querySelector("#clearArchiveButton");
 const refreshListenersButton = document.querySelector("#refreshListenersButton");
 const resetListenersButton = document.querySelector("#resetListenersButton");
 const listenerList = document.querySelector("#listenerList");
@@ -123,7 +122,6 @@ voiceMusicLockButton?.addEventListener("click", toggleVoiceMusicLock);
 refreshPromptsButton?.addEventListener("click", refreshPrompts);
 refreshArchiveButton?.addEventListener("click", refreshArchive);
 loadMoreVoiceArchiveButton?.addEventListener("click", loadMoreVoiceArchive);
-clearArchiveButton?.addEventListener("click", clearArchive);
 liveUploadInput?.addEventListener("change", () => uploadAudioFiles("live", liveUploadInput));
 playUploadInput?.addEventListener("change", () => uploadAudioFiles("play", playUploadInput));
 catalogLiveUploadInput?.addEventListener("change", () => uploadAudioFiles("live", catalogLiveUploadInput, { vibe: "chill", role: "live" }));
@@ -1527,33 +1525,6 @@ function setBroadcastButtonStopped(isStopped) {
   stopBroadcastButton.textContent = isStopped ? "Восстановить эфир" : "Остановить эфир";
   stopBroadcastButton.classList.toggle("danger-button", !isStopped);
   stopBroadcastButton.classList.toggle("primary-action", isStopped);
-}
-
-async function clearArchive() {
-  const confirmed = window.confirm("Удалить все архивы аудио? Это удалит mp3 приветствий, фактов, прощаний и слушательских вопросов.");
-  if (!confirmed) return;
-  const typed = window.prompt("Для подтверждения введите: УДАЛИТЬ");
-  if (typed !== "УДАЛИТЬ") {
-    setStatus("Очистка архива отменена");
-    return;
-  }
-  const response = await adminFetch("/api/admin/archive/clear", { method: "POST" });
-  if (!response.ok) {
-    setStatus("Не удалось очистить архив");
-    return;
-  }
-  archiveItems = [];
-  audioFiles = {
-    ...audioFiles,
-    voiceArchive: [],
-    voiceArchivePage: { offset: 0, limit: 80, total: 0, hasMore: false },
-    counts: { ...(audioFiles.counts || {}), voice: 0 },
-  };
-  factLog = { cursor: { topicIndex: 0, subtopicIndex: 0 }, facts: [] };
-  renderArchive();
-  renderTopicList();
-  renderTopicDetail();
-  setStatus("Все архивы аудио удалены");
 }
 
 async function refreshListeners() {

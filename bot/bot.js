@@ -563,16 +563,6 @@ async function sendAiUsageReport(chatId) {
   await send(chatId, formatAiUsageReport(usage), buildAdminPanelReplyMarkup());
 }
 
-async function sendStarBalanceReport(chatId) {
-  try {
-    const payload = await telegram("getMyStarBalance", {});
-    const amount = payload.result?.amount ?? 0;
-    await send(chatId, `Баланс бота: ${amount} Stars.`, buildAdminPanelReplyMarkup());
-  } catch (error) {
-    await send(chatId, `Не удалось получить баланс Stars: ${error.message}`, buildAdminPanelReplyMarkup());
-  }
-}
-
 async function sendStarBalanceReportV2(chatId) {
   let botBalance = null;
   let botBalanceError = "";

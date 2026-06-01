@@ -20,11 +20,7 @@ const hostScene = document.querySelector("#hostScene");
 const hostImage = document.querySelector("#hostImage");
 const hostMood = document.querySelector("#hostMood");
 const hostTrackTitle = document.querySelector("#hostTrackTitle");
-const nextButton = document.querySelector("#nextButton");
-const refreshButton = document.querySelector("#refreshButton");
-const syncMusicButton = document.querySelector("#syncMusicButton");
 const stopBroadcastButton = document.querySelector("#stopBroadcastButton");
-const showAdminButton = document.querySelector("#showAdminButton");
 const themeToggle = document.querySelector("#themeToggle");
 const isAdminPage = Boolean(document.querySelector(".admin-app"));
 const isPublicPage = Boolean(document.querySelector(".public-app"));
@@ -89,20 +85,6 @@ playButton?.addEventListener("click", async () => {
     audio.pause();
     setStatus("Пауза эфира");
   }
-});
-
-nextButton?.addEventListener("click", async () => {
-  await reconnectLiveStream();
-});
-
-refreshButton?.addEventListener("click", async () => {
-  await Promise.all([loadTracks(), loadRadioState()]);
-});
-
-syncMusicButton?.addEventListener("click", syncMusic);
-
-showAdminButton?.addEventListener("click", () => {
-  window.location.href = "/simsim";
 });
 
 audio?.addEventListener("play", () => {
@@ -236,22 +218,6 @@ async function loadTracks() {
     if (playTracksEl) renderTracks(playTracksEl, playTracks, { action: true, empty: "Папка music/play пока пустая" });
   } catch (error) {
     renderTrackError(tracksEl || liveTracksEl || playTracksEl, error);
-  }
-}
-
-async function syncMusic() {
-  if (syncMusicButton) syncMusicButton.disabled = true;
-  setStatus("Syncing music folders");
-  try {
-    const response = await fetch("/api/admin/music/sync", { method: "POST" });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Music sync failed");
-    await Promise.all([loadTracks(), loadRadioState()]);
-    setStatus(`Music synced. Live: ${(payload.liveTracks || []).length}. Play: ${(payload.playTracks || []).length}. Removed from queue: ${payload.removedQueued || 0}.`);
-  } catch (error) {
-    setStatus(`Music sync failed: ${error.message}`);
-  } finally {
-    if (syncMusicButton) syncMusicButton.disabled = false;
   }
 }
 

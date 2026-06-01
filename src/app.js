@@ -11,7 +11,7 @@ const { pingElevenLabs } = require("./ai/elevenlabs");
 const { getAiUsage } = require("./ai/usage");
 const { readAdminConfig, writeAdminConfig } = require("./adminStore");
 const { BroadcastStream } = require("./broadcast");
-const { readAvailableFactLog, resetFactLog, setCursor } = require("./factLog");
+const { readAvailableFactLog, setCursor } = require("./factLog");
 const { readJson, sendFile, sendJson } = require("./http");
 const {
   acceptQuestion,
@@ -259,11 +259,6 @@ function createServer(config) {
         return;
       }
 
-      if (request.method === "GET" && url.pathname === "/api/admin/music/catalog") {
-        await sendJson(response, 200, await getMusicCatalogPayload(config, broadcast));
-        return;
-      }
-
       if (request.method === "GET" && url.pathname === "/api/admin/listeners") {
         await sendJson(response, 200, await readListenerStore(config));
         return;
@@ -327,17 +322,6 @@ function createServer(config) {
           file: track.file,
           stream: broadcast.getStatus(),
           error: ok ? null : broadcast.lastMusicEnqueueError || "Track file is not available",
-        });
-        return;
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/admin/music/sync") {
-        const result = await broadcast.syncMusicFiles();
-        await sendJson(response, 200, {
-          synced: true,
-          ...result,
-          tracks: result.liveTracks,
-          stream: broadcast.getStatus(),
         });
         return;
       }
@@ -489,13 +473,6 @@ function createServer(config) {
         await emitAdmin(config, "config", admin);
         await emitFactState(config);
         await sendJson(response, 200, { admin, reset: false });
-        return;
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/admin/archive/clear") {
-        await resetGeneratedAudio(config);
-        await emitAdmin(config, "archive", { changed: true });
-        await sendJson(response, 200, { cleared: true });
         return;
       }
 
@@ -1558,18 +1535,6 @@ function enqueueListenerVoiceBroadcast(config, broadcast, question, event) {
       await emitAdmin(config, "listeners", await readListenerStore(config));
     },
   });
-}
-
-async function resetGeneratedAudio(config) {
-  await Promise.all([
-    fs.promises.rm(config.archiveDir, { recursive: true, force: true }),
-    fs.promises.rm(config.cacheDir, { recursive: true, force: true }),
-  ]);
-  await Promise.all([
-    fs.promises.mkdir(config.archiveDir, { recursive: true }),
-    fs.promises.mkdir(config.cacheDir, { recursive: true }),
-  ]);
-  await resetFactLog(config);
 }
 
 async function trackFunnel(config, entry) {
